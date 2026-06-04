@@ -127,8 +127,14 @@ func (c *Converter) runAgent(ctx context.Context, agt *llmagent.LLMAgent, prompt
 		if evt.Error != nil {
 			return "", fmt.Errorf("agent error: %s", evt.Error.Message)
 		}
-		if len(evt.Response.Choices) > 0 {
-			sb.WriteString(evt.Response.Choices[0].Message.Content)
+		for _, choice := range evt.Response.Choices {
+			content := choice.Message.Content
+			if content == "" {
+				content = choice.Delta.Content
+			}
+			if content != "" {
+				sb.WriteString(content)
+			}
 		}
 	}
 	return sb.String(), nil

@@ -29,9 +29,15 @@ func Run(ctx context.Context, agt *llmagent.LLMAgent, prompt string) (string, er
 		if evt.Error != nil {
 			return "", fmt.Errorf("agent error: %s", evt.Error.Message)
 		}
-		if len(evt.Response.Choices) > 0 {
-			content := evt.Response.Choices[0].Message.Content
-			sb.WriteString(content)
+		for _, choice := range evt.Response.Choices {
+			// Collect from Message.Content (non-streaming) or Delta.Content (streaming chunks)
+			content := choice.Message.Content
+			if content == "" {
+				content = choice.Delta.Content
+			}
+			if content != "" {
+				sb.WriteString(content)
+			}
 		}
 	}
 	return sb.String(), nil
