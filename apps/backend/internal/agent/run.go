@@ -1,3 +1,5 @@
+// Package agent provides trpc-agent-go based AI agents for novel analysis
+// and screenplay generation.
 package agent
 
 import (
@@ -11,21 +13,20 @@ import (
 	"trpc.group/trpc-go/trpc-agent-go/runner"
 )
 
-// RunAgent executes a single-turn agent run and returns the text response.
-func RunAgent(ctx context.Context, agt *llmagent.LLMAgent, prompt string) (string, error) {
+// Run executes a single-turn agent run using the framework Runner.
+// It creates a Runner per call, which automatically handles OTel spans and logging.
+func Run(ctx context.Context, agt *llmagent.LLMAgent, prompt string) (string, error) {
 	r := runner.NewRunner("fabula-studio", agt)
+	sessionID := fmt.Sprintf("session-%d", time.Now().UnixNano())
 	msg := model.NewUserMessage(prompt)
-	eventChan, err := r.Run(ctx, "default-user", fmt.Sprintf("session-%d", time.Now().UnixNano()), msg)
+	eventChan, err := r.Run(ctx, "default-user", sessionID, msg)
 	if err != nil {
 		return "", fmt.Errorf("agent run failed: %w", err)
 	}
 
 	var sb strings.Builder
-	evtCount := 0
 	for evt := range eventChan {
-		evtCount++
 		if evt.Error != nil {
-			fmt.Printf("[Agent] Error event: %s\n", evt.Error.Message)
 			return "", fmt.Errorf("agent error: %s", evt.Error.Message)
 		}
 		if len(evt.Response.Choices) > 0 {
@@ -33,9 +34,5 @@ func RunAgent(ctx context.Context, agt *llmagent.LLMAgent, prompt string) (strin
 			sb.WriteString(content)
 		}
 	}
-	result := sb.String()
-	if result == "" {
-		fmt.Printf("[Agent] Warning: empty response after %d events\n", evtCount)
-	}
-	return result, nil
+	return sb.String(), nil
 }
