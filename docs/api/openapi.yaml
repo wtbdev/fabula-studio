@@ -1,0 +1,328 @@
+openapi: 3.0.3
+info:
+  title: Fabula Studio MVP API
+  version: 0.1.0
+  description: 叙幕工作室 MVP API，用于用户登录、项目管理、AI 生成剧本和场次编辑。
+servers:
+  - url: /api
+security:
+  - bearerAuth: []
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    ApiResponse:
+      type: object
+      properties:
+        code:
+          type: integer
+          example: 0
+        message:
+          type: string
+          example: success
+        data:
+          nullable: true
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+        nickname:
+          type: string
+        aiPoints:
+          type: integer
+    AdaptConfig:
+      type: object
+      properties:
+        style:
+          type: string
+          enum: [影视剧, 短剧, 舞台剧, 广播剧]
+        dialogueLevel:
+          type: string
+          enum: [简略, 适中, 详细]
+        adaptationMode:
+          type: string
+          enum: [忠实原文, 适度改编, 大胆改编]
+        sceneGranularity:
+          type: string
+          enum: [少量大场, 适中, 较多小场]
+        narrationLevel:
+          type: string
+          enum: [少量保留, 适中保留, 大量保留]
+        customPrompt:
+          type: string
+    Project:
+      type: object
+      properties:
+        id:
+          type: string
+        userId:
+          type: string
+        title:
+          type: string
+        novelTitle:
+          type: string
+        sourceText:
+          type: string
+        config:
+          $ref: '#/components/schemas/AdaptConfig'
+        status:
+          type: string
+          enum: [draft, generating, completed, failed]
+        errorMessage:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    Scene:
+      type: object
+      properties:
+        id:
+          type: string
+        projectId:
+          type: string
+        sceneNo:
+          type: integer
+        title:
+          type: string
+        location:
+          type: string
+        timeText:
+          type: string
+        summary:
+          type: string
+        content:
+          type: string
+        rawJson:
+          type: object
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+paths:
+  /auth/register:
+    post:
+      security: []
+      summary: 用户注册
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, nickname]
+              properties:
+                email:
+                  type: string
+                password:
+                  type: string
+                nickname:
+                  type: string
+      responses:
+        '200':
+          description: 注册成功
+  /auth/login:
+    post:
+      security: []
+      summary: 用户登录
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                password:
+                  type: string
+      responses:
+        '200':
+          description: 登录成功
+  /auth/me:
+    get:
+      summary: 获取当前用户
+      responses:
+        '200':
+          description: 当前用户信息
+  /auth/logout:
+    post:
+      summary: 退出登录
+      responses:
+        '200':
+          description: 退出成功
+  /projects:
+    post:
+      summary: 创建项目
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, sourceText, config]
+              properties:
+                title:
+                  type: string
+                novelTitle:
+                  type: string
+                sourceText:
+                  type: string
+                config:
+                  $ref: '#/components/schemas/AdaptConfig'
+      responses:
+        '200':
+          description: 创建成功
+    get:
+      summary: 获取项目列表
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            default: 10
+        - name: keyword
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 项目列表
+  /projects/{projectId}:
+    get:
+      summary: 获取项目详情
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 项目详情
+    patch:
+      summary: 修改项目基础信息
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                novelTitle:
+                  type: string
+      responses:
+        '200':
+          description: 更新成功
+    delete:
+      summary: 删除项目
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 删除成功
+  /projects/{projectId}/generate:
+    post:
+      summary: AI 生成剧本场次
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 生成成功
+  /projects/{projectId}/generate/status:
+    get:
+      summary: 获取生成状态，可选
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 生成状态
+  /projects/{projectId}/scenes:
+    get:
+      summary: 获取项目场次列表
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 场次列表
+  /scenes/{sceneId}:
+    get:
+      summary: 获取场次详情
+      parameters:
+        - name: sceneId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 场次详情
+    patch:
+      summary: 保存场次内容
+      parameters:
+        - name: sceneId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                title:
+                  type: string
+                location:
+                  type: string
+                timeText:
+                  type: string
+                summary:
+                  type: string
+                content:
+                  type: string
+      responses:
+        '200':
+          description: 保存成功
