@@ -9,27 +9,27 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/fabula-studio/backend/internal/agent"
+	"gopkg.in/yaml.v3"
+
 	"github.com/fabula-studio/backend/internal/config"
-	"github.com/fabula-studio/backend/internal/converter"
+	"github.com/fabula-studio/backend/internal/pipeline"
 	"github.com/fabula-studio/backend/internal/schema"
 )
 
 // Server holds dependencies and registered handlers.
 type Server struct {
-	config    config.Config
-	converter *converter.Converter
-	http      *http.Server
+	config   config.Config
+	pipeline *pipeline.Pipeline
+	http     *http.Server
 }
 
 // New creates and returns a configured Server.
 func New(cfg config.Config) *Server {
-	a := agent.NewNovelAgent(cfg.ModelName, cfg.APIKey, cfg.BaseURL)
-	conv := converter.New(a)
+	p := pipeline.New(pipeline.DefaultConfig(), cfg.ModelName, cfg.APIKey, cfg.BaseURL)
 
 	srv := &Server{
-		config:    cfg,
-		converter: conv,
+		config:   cfg,
+		pipeline: p,
 	}
 
 	mux := http.NewServeMux()
@@ -40,7 +40,7 @@ func New(cfg config.Config) *Server {
 		Addr:         cfg.Addr,
 		Handler:      withCORS(withLogging(mux)),
 		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 120 * time.Second,
+		WriteTimeout: 600 * time.Second, // longer timeout for full pipeline
 		IdleTimeout:  60 * time.Second,
 	}
 
@@ -90,23 +90,22 @@ func (s *Server) handleConvert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 180*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 600*time.Second)
 	defer cancel()
 
-	scr, yamlStr, err := s.converter.Convert(ctx, req.Title, req.Author, req.Chapters)
+	scr, err := s.pipeline.Convert(ctx, req.Title, req.Author, req.Chapters)
 	if err != nil {
 		log.Printf("conversion failed: %v", err)
-		resp := schema.ConversionResponse{
+		writeJSON(w, http.StatusInternalServerError, schema.ConversionResponse{
 			Error: err.Error(),
-			YAML:  yamlStr,
-		}
-		writeJSON(w, http.StatusInternalServerError, resp)
+		})
 		return
 	}
 
+	yamlBytes, _ := yaml.Marshal(scr)
 	resp := schema.ConversionResponse{
 		Screenplay: scr,
-		YAML:       yamlStr,
+		YAML:       string(yamlBytes),
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
