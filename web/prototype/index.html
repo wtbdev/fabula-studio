@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Fabula Studio - AI 小说转剧本原型</title>
+    <title>Fabula Studio - Mock Prototype</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
     <script>
@@ -11,17 +11,19 @@
         theme: {
           extend: {
             colors: {
-              ink: "#263130",
-              mist: "#F6F7F5",
-              paper: "#FFFDF8",
-              line: "#DCE2DC",
-              moss: "#3F7D68",
-              coral: "#D96F5D",
-              plum: "#76576F",
-              sun: "#E8B756",
+              ink: "#17211f",
+              slate: "#596966",
+              mist: "#f4f6f4",
+              paper: "#fffdf8",
+              line: "#dce3df",
+              teal: "#2f7664",
+              rust: "#b85f4b",
+              violet: "#715c8c",
+              amber: "#d49a2f",
+              sky: "#3c78a8",
             },
             boxShadow: {
-              soft: "0 14px 40px rgba(38, 49, 48, 0.08)",
+              pane: "0 16px 48px rgba(23, 33, 31, 0.09)",
             },
             fontFamily: {
               sans: [
@@ -33,824 +35,1112 @@
                 "Segoe UI",
                 "sans-serif",
               ],
-              serif: ["Georgia", "Noto Serif SC", "serif"],
+              script: ["Georgia", "Noto Serif SC", "serif"],
             },
           },
         },
       };
     </script>
     <style>
+      * {
+        box-sizing: border-box;
+      }
+
       html {
         scroll-behavior: smooth;
       }
 
       body {
         min-height: 100vh;
-        color: #263130;
-        background:
-          linear-gradient(180deg, rgba(246, 247, 245, 0.96), rgba(246, 247, 245, 1)),
-          url("https://images.unsplash.com/photo-1455390582262-044cdead277a?auto=format&fit=crop&w=1800&q=78");
-        background-attachment: fixed;
-        background-size: cover;
-        background-position: center;
+        color: #17211f;
+        background: #f4f6f4;
       }
 
-      .screen {
+      button,
+      input,
+      textarea,
+      select {
+        letter-spacing: 0;
+      }
+
+      .app-screen,
+      .workspace-panel,
+      .role-panel,
+      .agent-panel {
         display: none;
       }
 
-      .screen.active {
+      .app-screen.active,
+      .workspace-panel.active,
+      .role-panel.active,
+      .agent-panel.active {
         display: block;
       }
 
-      .chapter-tab.active,
-      .setting-pill.active,
-      .workspace-tab.active,
-      .format-tab.active {
-        border-color: #3f7d68;
-        background: #edf6f1;
-        color: #235b48;
+      .nav-item.active,
+      .segmented-item.active,
+      .pill.active,
+      .scene-card.active,
+      .role-card.active,
+      .export-format.active {
+        border-color: #2f7664;
+        background: #eef7f3;
+        color: #205b4b;
       }
 
-      .step.active {
-        border-color: #3f7d68;
-        background: #ffffff;
-        color: #263130;
+      .scene-card,
+      .role-card,
+      .nav-item,
+      .segmented-item,
+      .pill,
+      .export-format {
+        transition:
+          border-color 160ms ease,
+          background-color 160ms ease,
+          color 160ms ease,
+          transform 160ms ease;
       }
 
-      .step.active .step-dot {
-        background: #3f7d68;
-        color: white;
-      }
-
-      .scene-card.active {
-        border-color: #3f7d68;
-        background: #f7fbf8;
-      }
-
-      .progress-bar {
-        transition: width 420ms ease;
+      .scene-card:hover,
+      .role-card:hover {
+        transform: translateY(-1px);
       }
 
       .script-line[contenteditable="true"]:focus {
-        outline: 2px solid rgba(63, 125, 104, 0.35);
+        outline: 2px solid rgba(47, 118, 100, 0.28);
         outline-offset: 4px;
         border-radius: 6px;
       }
 
-      @media (max-width: 900px) {
-        body {
-          background-image: linear-gradient(180deg, #f6f7f5, #f6f7f5);
+      .drawer {
+        opacity: 0;
+        pointer-events: none;
+        transform: translateX(16px);
+        transition:
+          opacity 180ms ease,
+          transform 180ms ease;
+      }
+
+      .drawer.open {
+        opacity: 1;
+        pointer-events: auto;
+        transform: translateX(0);
+      }
+
+      .modal {
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 180ms ease;
+      }
+
+      .modal.open {
+        opacity: 1;
+        pointer-events: auto;
+      }
+
+      .modal-card {
+        transform: translateY(12px);
+        transition: transform 180ms ease;
+      }
+
+      .modal.open .modal-card {
+        transform: translateY(0);
+      }
+
+      .scrollbar-thin::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+      }
+
+      .scrollbar-thin::-webkit-scrollbar-thumb {
+        background: #c8d1cd;
+        border-radius: 999px;
+      }
+
+      .progress-fill {
+        transition: width 420ms ease;
+      }
+
+      @media (max-width: 1100px) {
+        .workspace-grid,
+        .role-grid,
+        .agent-grid {
+          grid-template-columns: minmax(0, 1fr);
         }
       }
     </style>
   </head>
   <body class="font-sans antialiased">
-    <div class="min-h-screen bg-mist/88">
-      <header class="sticky top-0 z-40 border-b border-line/80 bg-mist/92 backdrop-blur">
-        <div class="mx-auto flex max-w-[1440px] items-center justify-between gap-4 px-4 py-3 sm:px-6">
-          <button class="flex items-center gap-3 text-left" data-nav="import" aria-label="返回导入页">
-            <span class="grid h-10 w-10 place-items-center rounded-lg bg-ink text-paper shadow-soft">
+    <div class="min-h-screen lg:grid lg:grid-cols-[256px_minmax(0,1fr)]">
+      <aside class="border-b border-line bg-ink text-white lg:min-h-screen lg:border-b-0 lg:border-r">
+        <div class="flex h-full flex-col">
+          <div class="flex items-center gap-3 px-4 py-4">
+            <span class="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-paper text-ink">
               <i data-lucide="feather" class="h-5 w-5"></i>
             </span>
-            <span>
-              <span class="block text-base font-semibold tracking-normal text-ink">Fabula Studio</span>
-              <span class="block text-xs text-ink/58">AI 小说转剧本</span>
-            </span>
-          </button>
+            <div class="min-w-0">
+              <div class="truncate text-base font-semibold">叙幕工作室</div>
+              <div class="text-xs text-white/58">Fabula Studio</div>
+            </div>
+          </div>
 
-          <nav class="hidden items-center gap-2 lg:flex" aria-label="流程">
-            <button class="step active inline-flex h-10 items-center gap-2 rounded-lg border border-line bg-white/70 px-3 text-sm text-ink/66" data-nav="import">
-              <span class="step-dot grid h-5 w-5 place-items-center rounded-full bg-ink/10 text-[11px]">1</span>
-              导入小说
+          <nav class="flex gap-2 overflow-x-auto px-3 pb-3 lg:block lg:space-y-1 lg:overflow-visible lg:pb-0" aria-label="原型导航">
+            <button class="nav-item active inline-flex h-10 shrink-0 items-center gap-2 rounded-lg border border-white/10 px-3 text-sm text-white/76 lg:w-full" data-screen="dashboard" aria-label="项目总览">
+              <i data-lucide="layout-dashboard" class="h-4 w-4"></i>
+              项目总览
             </button>
-            <button class="step inline-flex h-10 items-center gap-2 rounded-lg border border-line bg-white/70 px-3 text-sm text-ink/66" data-nav="progress">
-              <span class="step-dot grid h-5 w-5 place-items-center rounded-full bg-ink/10 text-[11px]">2</span>
-              AI 改编
+            <button class="nav-item inline-flex h-10 shrink-0 items-center gap-2 rounded-lg border border-white/10 px-3 text-sm text-white/76 lg:w-full" data-screen="create" aria-label="创建项目">
+              <i data-lucide="file-plus-2" class="h-4 w-4"></i>
+              创建项目
             </button>
-            <button class="step inline-flex h-10 items-center gap-2 rounded-lg border border-line bg-white/70 px-3 text-sm text-ink/66" data-nav="workspace">
-              <span class="step-dot grid h-5 w-5 place-items-center rounded-full bg-ink/10 text-[11px]">3</span>
+            <button class="nav-item inline-flex h-10 shrink-0 items-center gap-2 rounded-lg border border-white/10 px-3 text-sm text-white/76 lg:w-full" data-screen="progress" aria-label="改编进度">
+              <i data-lucide="activity" class="h-4 w-4"></i>
+              改编进度
+            </button>
+            <button class="nav-item inline-flex h-10 shrink-0 items-center gap-2 rounded-lg border border-white/10 px-3 text-sm text-white/76 lg:w-full" data-screen="workspace" aria-label="剧本工作台">
+              <i data-lucide="panel-left" class="h-4 w-4"></i>
               剧本工作台
+            </button>
+            <button class="nav-item inline-flex h-10 shrink-0 items-center gap-2 rounded-lg border border-white/10 px-3 text-sm text-white/76 lg:w-full" data-screen="roles" aria-label="角色工作台">
+              <i data-lucide="users" class="h-4 w-4"></i>
+              角色工作台
+            </button>
+            <button class="nav-item inline-flex h-10 shrink-0 items-center gap-2 rounded-lg border border-white/10 px-3 text-sm text-white/76 lg:w-full" data-screen="agent" aria-label="Agent 心流">
+              <i data-lucide="bot" class="h-4 w-4"></i>
+              Agent 心流
+            </button>
+            <button class="nav-item inline-flex h-10 shrink-0 items-center gap-2 rounded-lg border border-white/10 px-3 text-sm text-white/76 lg:w-full" data-screen="admin" aria-label="后台管理">
+              <i data-lucide="settings-2" class="h-4 w-4"></i>
+              后台管理
             </button>
           </nav>
 
-          <div class="flex items-center gap-2">
-            <button class="grid h-10 w-10 place-items-center rounded-lg border border-line bg-white/80 text-ink/70 hover:text-ink" aria-label="通知">
-              <i data-lucide="bell" class="h-5 w-5"></i>
-            </button>
-            <button class="hidden h-10 items-center gap-2 rounded-lg bg-ink px-4 text-sm font-medium text-paper shadow-soft hover:bg-ink/90 sm:inline-flex" data-nav="workspace">
-              <i data-lucide="sparkles" class="h-4 w-4"></i>
-              查看初稿
-            </button>
+          <div class="mt-auto hidden p-4 lg:block">
+            <div class="rounded-lg border border-white/10 bg-white/7 p-3">
+              <div class="flex items-center justify-between">
+                <span class="text-xs text-white/56">AI 点数</span>
+                <span class="text-sm font-semibold">12,480</span>
+              </div>
+              <div class="mt-3 h-2 overflow-hidden rounded-full bg-white/12">
+                <div class="h-full w-[72%] rounded-full bg-amber"></div>
+              </div>
+              <div class="mt-3 flex items-center justify-between text-xs text-white/58">
+                <span>专业版</span>
+                <span>优先队列</span>
+              </div>
+            </div>
           </div>
         </div>
-      </header>
+      </aside>
 
-      <main class="mx-auto max-w-[1440px] px-4 py-5 sm:px-6">
-        <section id="screen-import" class="screen active">
-          <div class="grid gap-5 xl:grid-cols-[minmax(0,1.25fr)_420px]">
-            <div class="rounded-lg border border-line bg-white/94 shadow-soft">
-              <div class="flex flex-col gap-3 border-b border-line px-5 py-4 md:flex-row md:items-center md:justify-between">
-                <div>
-                  <h1 class="text-xl font-semibold tracking-normal text-ink">导入小说</h1>
-                  <p class="mt-1 text-sm text-ink/60">《雾港来信》 · 草稿</p>
-                </div>
-                <div class="flex flex-wrap items-center gap-2">
-                  <button class="inline-flex h-10 items-center gap-2 rounded-lg border border-line bg-white px-3 text-sm font-medium text-ink hover:border-moss/60" aria-label="上传文件">
-                    <i data-lucide="upload" class="h-4 w-4"></i>
-                    上传
-                  </button>
-                  <button class="inline-flex h-10 items-center gap-2 rounded-lg border border-line bg-white px-3 text-sm font-medium text-ink hover:border-moss/60" aria-label="从剪贴板粘贴">
-                    <i data-lucide="clipboard" class="h-4 w-4"></i>
-                    粘贴
-                  </button>
-                  <button class="inline-flex h-10 items-center gap-2 rounded-lg bg-moss px-4 text-sm font-medium text-white hover:bg-moss/92" data-action="start-progress">
-                    <i data-lucide="wand-sparkles" class="h-4 w-4"></i>
-                    开始改编
-                  </button>
-                </div>
-              </div>
-
-              <div class="grid gap-0 lg:grid-cols-[260px_minmax(0,1fr)]">
-                <aside class="border-b border-line bg-mist/75 p-4 lg:border-b-0 lg:border-r">
-                  <div class="flex items-center justify-between">
-                    <span class="text-sm font-semibold text-ink">章节</span>
-                    <span class="rounded-full bg-white px-2 py-1 text-xs text-moss">已满足 3 章</span>
-                  </div>
-                  <div class="mt-4 space-y-2">
-                    <button class="chapter-tab active flex w-full items-center justify-between rounded-lg border border-line bg-white px-3 py-3 text-left" data-chapter="1">
-                      <span>
-                        <span class="block text-sm font-medium">第一章 雾港</span>
-                        <span class="text-xs text-ink/54">3,264 字</span>
-                      </span>
-                      <i data-lucide="check-circle-2" class="h-4 w-4 text-moss"></i>
-                    </button>
-                    <button class="chapter-tab flex w-full items-center justify-between rounded-lg border border-line bg-white/76 px-3 py-3 text-left" data-chapter="2">
-                      <span>
-                        <span class="block text-sm font-medium">第二章 来信</span>
-                        <span class="text-xs text-ink/54">2,918 字</span>
-                      </span>
-                      <i data-lucide="check-circle-2" class="h-4 w-4 text-moss"></i>
-                    </button>
-                    <button class="chapter-tab flex w-full items-center justify-between rounded-lg border border-line bg-white/76 px-3 py-3 text-left" data-chapter="3">
-                      <span>
-                        <span class="block text-sm font-medium">第三章 码头</span>
-                        <span class="text-xs text-ink/54">3,807 字</span>
-                      </span>
-                      <i data-lucide="check-circle-2" class="h-4 w-4 text-moss"></i>
-                    </button>
-                    <button class="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-moss/55 bg-white/58 px-3 py-3 text-sm font-medium text-moss">
-                      <i data-lucide="plus" class="h-4 w-4"></i>
-                      添加章节
-                    </button>
-                  </div>
-
-                  <div class="mt-5 rounded-lg border border-line bg-white p-3">
-                    <div class="flex items-center justify-between text-sm">
-                      <span class="font-medium text-ink">文本状态</span>
-                      <span class="text-moss">良好</span>
-                    </div>
-                    <div class="mt-3 space-y-2 text-xs text-ink/62">
-                      <div class="flex items-center justify-between">
-                        <span>章节数量</span>
-                        <span class="font-medium text-ink">3</span>
-                      </div>
-                      <div class="flex items-center justify-between">
-                        <span>总字数</span>
-                        <span class="font-medium text-ink">9,989</span>
-                      </div>
-                      <div class="flex items-center justify-between">
-                        <span>人物提及</span>
-                        <span class="font-medium text-ink">12</span>
-                      </div>
-                    </div>
-                  </div>
-                </aside>
-
-                <div class="p-5">
-                  <div class="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                    <div>
-                      <label class="text-sm font-semibold text-ink" for="chapter-title">章节标题</label>
-                      <input id="chapter-title" class="mt-2 h-10 w-full rounded-lg border border-line bg-paper px-3 text-sm outline-none focus:border-moss md:w-[360px]" value="第一章 雾港" />
-                    </div>
-                    <div class="flex items-center gap-2 text-sm text-ink/62">
-                      <i data-lucide="clock-3" class="h-4 w-4 text-coral"></i>
-                      预计 5-8 分钟生成初稿
-                    </div>
-                  </div>
-
-                  <textarea class="min-h-[440px] w-full resize-y rounded-lg border border-line bg-paper p-4 font-serif text-[15px] leading-8 text-ink outline-none focus:border-moss" spellcheck="false">雾港的雨下了一整夜。
-
-林晚推开旧书店的门时，门铃发出细小的响声。店里没有客人，只有潮湿纸张和冷茶混在一起的气味。柜台后的老人抬起头，像是早就知道她会来。
-
-“你父亲留下了一封信。”老人说。
-
-林晚怔住。父亲已经失踪七年，家里所有人都说他不会再回来了。
-
-信封上没有邮戳，只有熟悉的字迹：给林晚，雾起时启。</textarea>
-
-                  <div class="mt-4 grid gap-3 md:grid-cols-3">
-                    <div class="rounded-lg border border-line bg-mist/70 p-3">
-                      <div class="flex items-center gap-2 text-sm font-medium">
-                        <i data-lucide="users" class="h-4 w-4 text-moss"></i>
-                        主要人物
-                      </div>
-                      <p class="mt-2 text-sm text-ink/64">林晚、旧书店老人、父亲</p>
-                    </div>
-                    <div class="rounded-lg border border-line bg-mist/70 p-3">
-                      <div class="flex items-center gap-2 text-sm font-medium">
-                        <i data-lucide="map-pin" class="h-4 w-4 text-coral"></i>
-                        主要地点
-                      </div>
-                      <p class="mt-2 text-sm text-ink/64">雾港旧书店</p>
-                    </div>
-                    <div class="rounded-lg border border-line bg-mist/70 p-3">
-                      <div class="flex items-center gap-2 text-sm font-medium">
-                        <i data-lucide="route" class="h-4 w-4 text-plum"></i>
-                        剧情功能
-                      </div>
-                      <p class="mt-2 text-sm text-ink/64">开启失踪谜团</p>
-                    </div>
-                  </div>
-                </div>
+      <div class="min-w-0">
+        <header class="sticky top-0 z-30 border-b border-line bg-mist/94 backdrop-blur">
+          <div class="flex min-h-16 flex-col gap-3 px-4 py-3 xl:flex-row xl:items-center xl:justify-between xl:px-6">
+            <div class="flex min-w-0 items-center gap-3">
+              <button class="grid h-10 w-10 place-items-center rounded-lg border border-line bg-white text-ink/70 lg:hidden" aria-label="菜单">
+                <i data-lucide="menu" class="h-5 w-5"></i>
+              </button>
+              <div class="min-w-0">
+                <div id="page-title" class="truncate text-lg font-semibold">项目总览</div>
+                <div id="page-subtitle" class="truncate text-sm text-slate">雾港来信 · 待修改 · 最近保存 2 分钟前</div>
               </div>
             </div>
 
-            <aside class="space-y-5">
-              <section class="overflow-hidden rounded-lg border border-line bg-white/94 shadow-soft">
-                <img
-                  src="https://images.unsplash.com/photo-1519682337058-a94d519337bc?auto=format&fit=crop&w=900&q=78"
-                  alt="书桌上的稿纸与笔记"
-                  class="h-40 w-full object-cover"
-                />
-                <div class="p-5">
+            <div class="flex flex-wrap items-center gap-2">
+              <button class="inline-flex h-10 items-center gap-2 rounded-lg border border-line bg-white px-3 text-sm font-medium text-ink" aria-label="每日签到">
+                <i data-lucide="calendar-check" class="h-4 w-4 text-teal"></i>
+                签到
+              </button>
+              <button class="inline-flex h-10 items-center gap-2 rounded-lg border border-line bg-white px-3 text-sm font-medium text-ink" aria-label="购买 AI 点数">
+                <i data-lucide="coins" class="h-4 w-4 text-amber"></i>
+                12,480
+              </button>
+              <button class="inline-flex h-10 items-center gap-2 rounded-lg border border-line bg-white px-3 text-sm font-medium text-ink" aria-label="账户设置">
+                <span class="grid h-6 w-6 place-items-center rounded-full bg-violet/12 text-xs font-semibold text-violet">水</span>
+                Pro
+              </button>
+              <button class="inline-flex h-10 items-center gap-2 rounded-lg bg-ink px-4 text-sm font-medium text-paper" data-open-export>
+                <i data-lucide="download" class="h-4 w-4"></i>
+                导出
+              </button>
+            </div>
+          </div>
+        </header>
+
+        <main class="px-4 py-5 xl:px-6">
+          <section id="screen-dashboard" class="app-screen active">
+            <div class="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+              <div class="space-y-5">
+                <section class="rounded-lg border border-line bg-white shadow-pane">
+                  <div class="flex flex-col gap-3 border-b border-line px-5 py-4 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <h1 class="text-xl font-semibold">项目</h1>
+                      <p class="mt-1 text-sm text-slate">小说改编工程、任务状态和最近修改入口</p>
+                    </div>
+                    <button class="inline-flex h-10 items-center gap-2 rounded-lg bg-teal px-4 text-sm font-medium text-white" data-screen-link="create">
+                      <i data-lucide="plus" class="h-4 w-4"></i>
+                      新建项目
+                    </button>
+                  </div>
+
+                  <div class="grid divide-y divide-line">
+                    <article class="grid gap-4 px-5 py-4 lg:grid-cols-[minmax(0,1fr)_180px_160px_120px] lg:items-center">
+                      <div class="min-w-0">
+                        <div class="flex flex-wrap items-center gap-2">
+                          <h2 class="truncate font-semibold">雾港来信</h2>
+                          <span class="rounded-full bg-teal/10 px-2 py-1 text-xs text-teal">待修改</span>
+                          <span class="rounded-full bg-violet/10 px-2 py-1 text-xs text-violet">电影剧本</span>
+                        </div>
+                        <p class="mt-2 text-sm leading-6 text-slate">3 个小说章节已生成 6 场剧本，角色关系表等待确认 2 条建议。</p>
+                      </div>
+                      <div class="text-sm text-slate">
+                        <div class="font-medium text-ink">6 场 / 4 角色</div>
+                        <div class="mt-1">YAML 已通过</div>
+                      </div>
+                      <div class="text-sm text-slate">
+                        <div class="font-medium text-ink">消耗 840 点</div>
+                        <div class="mt-1">保存于 14:32</div>
+                      </div>
+                      <button class="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-line bg-white px-3 text-sm font-medium" data-screen-link="workspace">
+                        <i data-lucide="arrow-right" class="h-4 w-4"></i>
+                        进入
+                      </button>
+                    </article>
+
+                    <article class="grid gap-4 px-5 py-4 lg:grid-cols-[minmax(0,1fr)_180px_160px_120px] lg:items-center">
+                      <div class="min-w-0">
+                        <div class="flex flex-wrap items-center gap-2">
+                          <h2 class="truncate font-semibold">北境药师</h2>
+                          <span class="rounded-full bg-amber/14 px-2 py-1 text-xs text-ink/70">改编中</span>
+                          <span class="rounded-full bg-sky/10 px-2 py-1 text-xs text-sky">短剧</span>
+                        </div>
+                        <p class="mt-2 text-sm leading-6 text-slate">12 个章节正在分批处理，当前执行人物关系建模。</p>
+                      </div>
+                      <div class="text-sm text-slate">
+                        <div class="font-medium text-ink">解析 9 / 12</div>
+                        <div class="mt-1">已识别 18 角色</div>
+                      </div>
+                      <div class="text-sm text-slate">
+                        <div class="font-medium text-ink">消耗 1,600 点</div>
+                        <div class="mt-1">剩余约 9 分钟</div>
+                      </div>
+                      <button class="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-line bg-white px-3 text-sm font-medium" data-screen-link="progress">
+                        <i data-lucide="activity" class="h-4 w-4"></i>
+                        查看
+                      </button>
+                    </article>
+
+                    <article class="grid gap-4 px-5 py-4 lg:grid-cols-[minmax(0,1fr)_180px_160px_120px] lg:items-center">
+                      <div class="min-w-0">
+                        <div class="flex flex-wrap items-center gap-2">
+                          <h2 class="truncate font-semibold">铜雀旧案</h2>
+                          <span class="rounded-full bg-line px-2 py-1 text-xs text-slate">草稿</span>
+                          <span class="rounded-full bg-rust/10 px-2 py-1 text-xs text-rust">舞台剧</span>
+                        </div>
+                        <p class="mt-2 text-sm leading-6 text-slate">已上传 2 个章节，仍需至少 1 个章节才能创建 AI 改编任务。</p>
+                      </div>
+                      <div class="text-sm text-slate">
+                        <div class="font-medium text-ink">2 / 3 章节</div>
+                        <div class="mt-1">等待补充</div>
+                      </div>
+                      <div class="text-sm text-slate">
+                        <div class="font-medium text-ink">未消耗</div>
+                        <div class="mt-1">草稿保存</div>
+                      </div>
+                      <button class="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-line bg-white px-3 text-sm font-medium" data-screen-link="create">
+                        <i data-lucide="edit-3" class="h-4 w-4"></i>
+                        继续
+                      </button>
+                    </article>
+                  </div>
+                </section>
+
+                <section class="grid gap-4 md:grid-cols-4">
+                  <article class="rounded-lg border border-line bg-white p-4">
+                    <div class="flex items-center justify-between">
+                      <span class="text-sm text-slate">项目总数</span>
+                      <i data-lucide="folder-kanban" class="h-4 w-4 text-teal"></i>
+                    </div>
+                    <div class="mt-3 text-2xl font-semibold">18</div>
+                    <div class="mt-1 text-xs text-slate">本月新增 4 个</div>
+                  </article>
+                  <article class="rounded-lg border border-line bg-white p-4">
+                    <div class="flex items-center justify-between">
+                      <span class="text-sm text-slate">生成场景</span>
+                      <i data-lucide="clapperboard" class="h-4 w-4 text-rust"></i>
+                    </div>
+                    <div class="mt-3 text-2xl font-semibold">246</div>
+                    <div class="mt-1 text-xs text-slate">格式通过率 93%</div>
+                  </article>
+                  <article class="rounded-lg border border-line bg-white p-4">
+                    <div class="flex items-center justify-between">
+                      <span class="text-sm text-slate">角色档案</span>
+                      <i data-lucide="users" class="h-4 w-4 text-violet"></i>
+                    </div>
+                    <div class="mt-3 text-2xl font-semibold">71</div>
+                    <div class="mt-1 text-xs text-slate">12 条待确认关系</div>
+                  </article>
+                  <article class="rounded-lg border border-line bg-white p-4">
+                    <div class="flex items-center justify-between">
+                      <span class="text-sm text-slate">导出文件</span>
+                      <i data-lucide="download" class="h-4 w-4 text-sky"></i>
+                    </div>
+                    <div class="mt-3 text-2xl font-semibold">32</div>
+                    <div class="mt-1 text-xs text-slate">DOCX / YAML / PDF</div>
+                  </article>
+                </section>
+              </div>
+
+              <aside class="space-y-5">
+                <section class="overflow-hidden rounded-lg border border-line bg-white shadow-pane">
+                  <img
+                    src="https://images.unsplash.com/photo-1519682337058-a94d519337bc?auto=format&fit=crop&w=900&q=78"
+                    alt="剧本工作台缩略图"
+                    class="h-36 w-full object-cover"
+                  />
+                  <div class="p-4">
+                    <div class="flex items-center justify-between">
+                      <h2 class="font-semibold">账户</h2>
+                      <span class="rounded-full bg-ink px-2 py-1 text-xs text-white">Pro</span>
+                    </div>
+                    <div class="mt-4 space-y-3 text-sm">
+                      <div class="flex items-center justify-between">
+                        <span class="text-slate">AI 点数</span>
+                        <span class="font-semibold">12,480</span>
+                      </div>
+                      <div class="flex items-center justify-between">
+                        <span class="text-slate">本月赠送</span>
+                        <span class="font-semibold">8,000</span>
+                      </div>
+                      <div class="flex items-center justify-between">
+                        <span class="text-slate">高级导出</span>
+                        <span class="font-semibold text-teal">可用</span>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                <section class="rounded-lg border border-line bg-white p-4 shadow-pane">
                   <div class="flex items-center justify-between">
-                    <h2 class="text-base font-semibold">改编偏好</h2>
-                    <button class="grid h-9 w-9 place-items-center rounded-lg border border-line text-ink/70 hover:text-ink" aria-label="重置偏好">
+                    <h2 class="font-semibold">任务监控</h2>
+                    <button class="grid h-8 w-8 place-items-center rounded-lg border border-line" aria-label="刷新任务">
+                      <i data-lucide="refresh-cw" class="h-4 w-4"></i>
+                    </button>
+                  </div>
+                  <div class="mt-4 space-y-3">
+                    <div>
+                      <div class="flex items-center justify-between text-sm">
+                        <span>北境药师</span>
+                        <span class="font-medium text-teal">61%</span>
+                      </div>
+                      <div class="mt-2 h-2 overflow-hidden rounded-full bg-mist">
+                        <div class="h-full w-[61%] rounded-full bg-teal"></div>
+                      </div>
+                    </div>
+                    <div>
+                      <div class="flex items-center justify-between text-sm">
+                        <span>关系更新建议</span>
+                        <span class="font-medium text-rust">2 条</span>
+                      </div>
+                      <div class="mt-2 h-2 overflow-hidden rounded-full bg-mist">
+                        <div class="h-full w-[35%] rounded-full bg-rust"></div>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+              </aside>
+            </div>
+          </section>
+
+          <section id="screen-create" class="app-screen">
+            <div class="grid gap-5 xl:grid-cols-[minmax(0,1fr)_390px]">
+              <section class="rounded-lg border border-line bg-white shadow-pane">
+                <div class="border-b border-line px-5 py-4">
+                  <h1 class="text-xl font-semibold">创建小说改编项目</h1>
+                  <p class="mt-1 text-sm text-slate">项目信息、小说内容、改编参数与高级提示词</p>
+                </div>
+
+                <div class="grid gap-0 lg:grid-cols-[minmax(0,1fr)_320px]">
+                  <div class="p-5">
+                    <div class="grid gap-4 md:grid-cols-2">
+                      <label class="block">
+                        <span class="text-sm font-medium">项目名称</span>
+                        <input class="mt-2 h-10 w-full rounded-lg border border-line bg-paper px-3 text-sm outline-none focus:border-teal" value="雾港来信" />
+                      </label>
+                      <label class="block">
+                        <span class="text-sm font-medium">小说标题</span>
+                        <input class="mt-2 h-10 w-full rounded-lg border border-line bg-paper px-3 text-sm outline-none focus:border-teal" value="雾港来信" />
+                      </label>
+                      <label class="block">
+                        <span class="text-sm font-medium">小说类型</span>
+                        <select class="mt-2 h-10 w-full rounded-lg border border-line bg-paper px-3 text-sm outline-none focus:border-teal">
+                          <option>悬疑 / 剧情</option>
+                          <option>都市 / 情感</option>
+                          <option>古装 / 权谋</option>
+                          <option>奇幻 / 冒险</option>
+                        </select>
+                      </label>
+                      <label class="block">
+                        <span class="text-sm font-medium">目标剧本类型</span>
+                        <select class="mt-2 h-10 w-full rounded-lg border border-line bg-paper px-3 text-sm outline-none focus:border-teal">
+                          <option>影视剧本</option>
+                          <option>短剧</option>
+                          <option>舞台剧</option>
+                          <option>广播剧</option>
+                          <option>动画剧本</option>
+                        </select>
+                      </label>
+                    </div>
+
+                    <div class="mt-5">
+                      <div class="mb-3 flex items-center justify-between">
+                        <h2 class="font-semibold">小说章节</h2>
+                        <div class="flex gap-2">
+                          <button class="grid h-9 w-9 place-items-center rounded-lg border border-line bg-white" aria-label="上传 txt 或 docx">
+                            <i data-lucide="upload" class="h-4 w-4"></i>
+                          </button>
+                          <button class="grid h-9 w-9 place-items-center rounded-lg border border-line bg-white" aria-label="添加章节">
+                            <i data-lucide="plus" class="h-4 w-4"></i>
+                          </button>
+                        </div>
+                      </div>
+
+                      <div class="grid gap-3">
+                        <div class="rounded-lg border border-line bg-mist p-3">
+                          <div class="flex items-center justify-between">
+                            <span class="text-sm font-medium">第一章 雾港</span>
+                            <span class="text-xs text-teal">3,264 字</span>
+                          </div>
+                          <textarea class="mt-3 min-h-28 w-full resize-y rounded-lg border border-line bg-paper p-3 font-script text-sm leading-7 outline-none focus:border-teal">雾港的雨下了一整夜。林晚推开旧书店的门时，门铃发出细小的响声。</textarea>
+                        </div>
+                        <div class="rounded-lg border border-line bg-mist p-3">
+                          <div class="flex items-center justify-between">
+                            <span class="text-sm font-medium">第二章 来信</span>
+                            <span class="text-xs text-teal">2,918 字</span>
+                          </div>
+                          <textarea class="mt-3 min-h-24 w-full resize-y rounded-lg border border-line bg-paper p-3 font-script text-sm leading-7 outline-none focus:border-teal">信封没有邮戳，只有熟悉的字迹：给林晚，雾起时启。</textarea>
+                        </div>
+                        <div class="rounded-lg border border-line bg-mist p-3">
+                          <div class="flex items-center justify-between">
+                            <span class="text-sm font-medium">第三章 码头</span>
+                            <span class="text-xs text-teal">3,807 字</span>
+                          </div>
+                          <textarea class="mt-3 min-h-24 w-full resize-y rounded-lg border border-line bg-paper p-3 font-script text-sm leading-7 outline-none focus:border-teal">雾港码头的仓库门半掩着，铁皮屋顶传来迟缓的雨声。</textarea>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <aside class="border-t border-line bg-mist p-5 lg:border-l lg:border-t-0">
+                    <h2 class="font-semibold">预处理预览</h2>
+                    <div class="mt-4 grid grid-cols-2 gap-3">
+                      <div class="rounded-lg border border-line bg-white p-3">
+                        <div class="text-xs text-slate">章节</div>
+                        <div class="mt-2 text-xl font-semibold">3</div>
+                      </div>
+                      <div class="rounded-lg border border-line bg-white p-3">
+                        <div class="text-xs text-slate">人物</div>
+                        <div class="mt-2 text-xl font-semibold">12</div>
+                      </div>
+                      <div class="rounded-lg border border-line bg-white p-3">
+                        <div class="text-xs text-slate">地点</div>
+                        <div class="mt-2 text-xl font-semibold">7</div>
+                      </div>
+                      <div class="rounded-lg border border-line bg-white p-3">
+                        <div class="text-xs text-slate">事件</div>
+                        <div class="mt-2 text-xl font-semibold">18</div>
+                      </div>
+                    </div>
+
+                    <div class="mt-5 space-y-3 text-sm">
+                      <div class="flex items-center justify-between rounded-lg border border-line bg-white px-3 py-2">
+                        <span>章节识别</span>
+                        <i data-lucide="check" class="h-4 w-4 text-teal"></i>
+                      </div>
+                      <div class="flex items-center justify-between rounded-lg border border-line bg-white px-3 py-2">
+                        <span>对白识别</span>
+                        <i data-lucide="check" class="h-4 w-4 text-teal"></i>
+                      </div>
+                      <div class="flex items-center justify-between rounded-lg border border-line bg-white px-3 py-2">
+                        <span>时间线分析</span>
+                        <i data-lucide="check" class="h-4 w-4 text-teal"></i>
+                      </div>
+                      <div class="flex items-center justify-between rounded-lg border border-line bg-white px-3 py-2">
+                        <span>原文索引</span>
+                        <i data-lucide="check" class="h-4 w-4 text-teal"></i>
+                      </div>
+                    </div>
+                  </aside>
+                </div>
+              </section>
+
+              <aside class="space-y-5">
+                <section class="rounded-lg border border-line bg-white p-5 shadow-pane">
+                  <div class="flex items-center justify-between">
+                    <h2 class="font-semibold">改编参数</h2>
+                    <button class="grid h-8 w-8 place-items-center rounded-lg border border-line" aria-label="重置参数">
                       <i data-lucide="rotate-ccw" class="h-4 w-4"></i>
                     </button>
                   </div>
 
-                  <div class="mt-5 space-y-5">
+                  <div class="mt-4 space-y-5">
                     <div>
-                      <div class="mb-2 text-sm font-medium">剧本类型</div>
+                      <div class="mb-2 text-sm font-medium">改编风格</div>
                       <div class="grid grid-cols-2 gap-2">
-                        <button class="setting-pill active h-10 rounded-lg border border-line bg-white text-sm">电影</button>
-                        <button class="setting-pill h-10 rounded-lg border border-line bg-white text-sm">短剧</button>
-                        <button class="setting-pill h-10 rounded-lg border border-line bg-white text-sm">网剧</button>
-                        <button class="setting-pill h-10 rounded-lg border border-line bg-white text-sm">舞台剧</button>
+                        <button class="pill active h-10 rounded-lg border border-line bg-white text-sm">影视剧</button>
+                        <button class="pill h-10 rounded-lg border border-line bg-white text-sm">短剧</button>
+                        <button class="pill h-10 rounded-lg border border-line bg-white text-sm">舞台剧</button>
+                        <button class="pill h-10 rounded-lg border border-line bg-white text-sm">广播剧</button>
                       </div>
                     </div>
 
-                    <div>
-                      <div class="mb-2 text-sm font-medium">改编方式</div>
-                      <div class="grid gap-2">
-                        <button class="setting-pill active flex h-11 items-center justify-between rounded-lg border border-line bg-white px-3 text-sm">
-                          忠于原作
-                          <i data-lucide="book-open-check" class="h-4 w-4"></i>
-                        </button>
-                        <button class="setting-pill flex h-11 items-center justify-between rounded-lg border border-line bg-white px-3 text-sm">
-                          强化冲突
-                          <i data-lucide="flame" class="h-4 w-4"></i>
-                        </button>
-                        <button class="setting-pill flex h-11 items-center justify-between rounded-lg border border-line bg-white px-3 text-sm">
-                          压缩节奏
-                          <i data-lucide="timer-reset" class="h-4 w-4"></i>
-                        </button>
-                      </div>
-                    </div>
-
-                    <div>
+                    <label class="block">
                       <div class="mb-2 flex items-center justify-between text-sm font-medium">
-                        <span>对白比例</span>
-                        <span class="text-moss">适中</span>
+                        <span>剧情保真度</span>
+                        <span class="text-teal">高</span>
                       </div>
-                      <input type="range" min="1" max="3" value="2" class="w-full accent-moss" aria-label="对白比例" />
-                      <div class="mt-1 flex justify-between text-xs text-ink/50">
-                        <span>少</span>
-                        <span>适中</span>
-                        <span>多</span>
-                      </div>
-                    </div>
-
-                    <div>
+                      <input class="w-full accent-teal" type="range" min="1" max="5" value="4" />
+                    </label>
+                    <label class="block">
                       <div class="mb-2 flex items-center justify-between text-sm font-medium">
-                        <span>场景粒度</span>
-                        <span class="text-moss">标准</span>
+                        <span>对白详细度</span>
+                        <span class="text-teal">适中</span>
                       </div>
-                      <input type="range" min="1" max="3" value="2" class="w-full accent-moss" aria-label="场景粒度" />
-                      <div class="mt-1 flex justify-between text-xs text-ink/50">
-                        <span>紧凑</span>
-                        <span>标准</span>
-                        <span>详细</span>
+                      <input class="w-full accent-rust" type="range" min="1" max="5" value="3" />
+                    </label>
+                    <label class="block">
+                      <div class="mb-2 flex items-center justify-between text-sm font-medium">
+                        <span>场景拆分粒度</span>
+                        <span class="text-teal">细</span>
                       </div>
-                    </div>
+                      <input class="w-full accent-violet" type="range" min="1" max="5" value="4" />
+                    </label>
+                    <label class="block">
+                      <div class="mb-2 flex items-center justify-between text-sm font-medium">
+                        <span>旁白保留程度</span>
+                        <span class="text-teal">低</span>
+                      </div>
+                      <input class="w-full accent-amber" type="range" min="1" max="5" value="2" />
+                    </label>
+
+                    <label class="block">
+                      <span class="text-sm font-medium">高级提示词</span>
+                      <textarea class="mt-2 min-h-32 w-full resize-y rounded-lg border border-line bg-paper p-3 text-sm leading-6 outline-none focus:border-teal">保留原作悬疑氛围，减少旁白，增加人物动作。每场控制在 3 分钟以内，强化林晚与陈伯之间的信息拉扯。</textarea>
+                    </label>
+
+                    <button class="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-teal px-4 text-sm font-medium text-white" data-screen-link="progress">
+                      <i data-lucide="wand-sparkles" class="h-4 w-4"></i>
+                      创建 AI 改编任务
+                    </button>
                   </div>
-                </div>
-              </section>
+                </section>
 
-              <section class="rounded-lg border border-line bg-white/94 p-5 shadow-soft">
-                <div class="flex items-start gap-3">
-                  <span class="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-coral/12 text-coral">
-                    <i data-lucide="lightbulb" class="h-5 w-5"></i>
-                  </span>
-                  <div>
-                    <h2 class="text-base font-semibold">AI 将保留</h2>
-                    <ul class="mt-3 space-y-2 text-sm text-ink/66">
-                      <li class="flex gap-2"><i data-lucide="check" class="mt-0.5 h-4 w-4 text-moss"></i>父亲失踪的悬念</li>
-                      <li class="flex gap-2"><i data-lucide="check" class="mt-0.5 h-4 w-4 text-moss"></i>林晚第一次接到线索</li>
-                      <li class="flex gap-2"><i data-lucide="check" class="mt-0.5 h-4 w-4 text-moss"></i>雾港潮湿压抑的氛围</li>
-                    </ul>
-                  </div>
-                </div>
-              </section>
-            </aside>
-          </div>
-        </section>
-
-        <section id="screen-progress" class="screen">
-          <div class="rounded-lg border border-line bg-white/94 shadow-soft">
-            <div class="border-b border-line px-5 py-4">
-              <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                <div>
-                  <h1 class="text-xl font-semibold tracking-normal">AI 改编中</h1>
-                  <p class="mt-1 text-sm text-ink/58">《雾港来信》 · 忠于原作 · 电影剧本</p>
-                </div>
-                <div class="flex items-center gap-2">
-                  <button class="inline-flex h-10 items-center gap-2 rounded-lg border border-line bg-white px-3 text-sm font-medium text-ink hover:border-coral/70">
-                    <i data-lucide="pause" class="h-4 w-4"></i>
-                    暂停
-                  </button>
-                  <button class="inline-flex h-10 items-center gap-2 rounded-lg bg-ink px-4 text-sm font-medium text-paper hover:bg-ink/90" data-nav="workspace">
-                    <i data-lucide="file-text" class="h-4 w-4"></i>
-                    查看剧本
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <div class="grid min-h-[660px] gap-0 lg:grid-cols-[minmax(0,1fr)_380px]">
-              <div class="p-5 md:p-8">
-                <div class="mx-auto max-w-3xl">
-                  <div class="rounded-lg border border-line bg-mist/70 p-5">
+                <section class="rounded-lg border border-line bg-white p-5 shadow-pane">
+                  <h2 class="font-semibold">点数预估</h2>
+                  <div class="mt-4 space-y-3 text-sm">
                     <div class="flex items-center justify-between">
-                      <span class="text-sm font-semibold">当前进度</span>
-                      <span id="progress-percent" class="text-sm font-semibold text-moss">68%</span>
+                      <span class="text-slate">基础改编</span>
+                      <span class="font-medium">650</span>
+                    </div>
+                    <div class="flex items-center justify-between">
+                      <span class="text-slate">角色关系分析</span>
+                      <span class="font-medium">120</span>
+                    </div>
+                    <div class="flex items-center justify-between">
+                      <span class="text-slate">YAML 结构化</span>
+                      <span class="font-medium">70</span>
+                    </div>
+                    <div class="border-t border-line pt-3">
+                      <div class="flex items-center justify-between">
+                        <span class="font-semibold">合计</span>
+                        <span class="font-semibold text-teal">840 点</span>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+              </aside>
+            </div>
+          </section>
+
+          <section id="screen-progress" class="app-screen">
+            <div class="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+              <section class="rounded-lg border border-line bg-white shadow-pane">
+                <div class="flex flex-col gap-3 border-b border-line px-5 py-4 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <h1 class="text-xl font-semibold">AI 改编任务</h1>
+                    <p class="mt-1 text-sm text-slate">北境药师 · 改编中 · 异步任务 #FS-2408</p>
+                  </div>
+                  <div class="flex gap-2">
+                    <button class="grid h-10 w-10 place-items-center rounded-lg border border-line bg-white" aria-label="暂停任务">
+                      <i data-lucide="pause" class="h-4 w-4"></i>
+                    </button>
+                    <button class="grid h-10 w-10 place-items-center rounded-lg border border-line bg-white" aria-label="重试失败步骤">
+                      <i data-lucide="refresh-cw" class="h-4 w-4"></i>
+                    </button>
+                    <button class="inline-flex h-10 items-center gap-2 rounded-lg bg-ink px-4 text-sm font-medium text-paper" data-screen-link="workspace">
+                      <i data-lucide="file-text" class="h-4 w-4"></i>
+                      初稿
+                    </button>
+                  </div>
+                </div>
+
+                <div class="p-5">
+                  <div class="rounded-lg border border-line bg-mist p-5">
+                    <div class="flex items-center justify-between">
+                      <span class="text-sm font-semibold">任务进度</span>
+                      <span id="progress-percent" class="text-sm font-semibold text-teal">61%</span>
                     </div>
                     <div class="mt-4 h-3 overflow-hidden rounded-full bg-white">
-                      <div id="progress-bar" class="progress-bar h-full w-[68%] rounded-full bg-moss"></div>
+                      <div id="progress-fill" class="progress-fill h-full w-[61%] rounded-full bg-teal"></div>
                     </div>
-                    <p id="progress-copy" class="mt-3 text-sm text-ink/64">正在规划场景，把章节拆成适合表演的连续片段。</p>
+                    <p id="progress-text" class="mt-3 text-sm text-slate">正在生成人物关系表，并为每条关系绑定来源章节。</p>
                   </div>
 
                   <div class="mt-5 grid gap-3">
-                    <article class="progress-item rounded-lg border border-moss bg-white p-4" data-progress-step="0">
-                      <div class="flex items-center gap-3">
-                        <span class="grid h-9 w-9 place-items-center rounded-lg bg-moss text-white"><i data-lucide="book-open" class="h-4 w-4"></i></span>
-                        <div>
-                          <h2 class="text-sm font-semibold">阅读章节</h2>
-                          <p class="mt-1 text-sm text-ink/56">识别章节顺序、人物和事件。</p>
+                    <article class="rounded-lg border border-teal bg-white p-4">
+                      <div class="flex items-start gap-3">
+                        <span class="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-teal text-white">
+                          <i data-lucide="book-open" class="h-4 w-4"></i>
+                        </span>
+                        <div class="min-w-0 flex-1">
+                          <div class="flex items-center justify-between gap-3">
+                            <h2 class="text-sm font-semibold">文本解析阶段</h2>
+                            <i data-lucide="check-circle-2" class="h-5 w-5 text-teal"></i>
+                          </div>
+                          <p class="mt-1 text-sm text-slate">章节、段落、人物、地点、时间已完成识别。</p>
                         </div>
-                        <i data-lucide="check-circle-2" class="ml-auto h-5 w-5 text-moss"></i>
                       </div>
                     </article>
-                    <article class="progress-item rounded-lg border border-moss bg-white p-4" data-progress-step="1">
-                      <div class="flex items-center gap-3">
-                        <span class="grid h-9 w-9 place-items-center rounded-lg bg-moss text-white"><i data-lucide="network" class="h-4 w-4"></i></span>
-                        <div>
-                          <h2 class="text-sm font-semibold">整理人物关系</h2>
-                          <p class="mt-1 text-sm text-ink/56">记录角色关系和已经公开的信息。</p>
+                    <article class="rounded-lg border border-teal bg-white p-4">
+                      <div class="flex items-start gap-3">
+                        <span class="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-teal text-white">
+                          <i data-lucide="route" class="h-4 w-4"></i>
+                        </span>
+                        <div class="min-w-0 flex-1">
+                          <div class="flex items-center justify-between gap-3">
+                            <h2 class="text-sm font-semibold">小说理解阶段</h2>
+                            <i data-lucide="check-circle-2" class="h-5 w-5 text-teal"></i>
+                          </div>
+                          <p class="mt-1 text-sm text-slate">主线、支线、冲突节点和时间线已提取。</p>
                         </div>
-                        <i data-lucide="check-circle-2" class="ml-auto h-5 w-5 text-moss"></i>
                       </div>
                     </article>
-                    <article class="progress-item rounded-lg border border-moss bg-white p-4" data-progress-step="2">
-                      <div class="flex items-center gap-3">
-                        <span class="grid h-9 w-9 place-items-center rounded-lg bg-moss text-white"><i data-lucide="layout-list" class="h-4 w-4"></i></span>
-                        <div>
-                          <h2 class="text-sm font-semibold">规划场景</h2>
-                          <p class="mt-1 text-sm text-ink/56">选择每一场的地点、人物和戏剧目标。</p>
+                    <article class="rounded-lg border border-teal bg-white p-4">
+                      <div class="flex items-start gap-3">
+                        <span class="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-teal text-white">
+                          <i data-lucide="network" class="h-4 w-4"></i>
+                        </span>
+                        <div class="min-w-0 flex-1">
+                          <div class="flex items-center justify-between gap-3">
+                            <h2 class="text-sm font-semibold">角色建模阶段</h2>
+                            <i data-lucide="loader-circle" class="h-5 w-5 animate-spin text-teal"></i>
+                          </div>
+                          <p class="mt-1 text-sm text-slate">正在生成角色档案、关系强度和原文依据。</p>
                         </div>
-                        <i data-lucide="loader-circle" class="ml-auto h-5 w-5 animate-spin text-moss"></i>
                       </div>
                     </article>
-                    <article class="progress-item rounded-lg border border-line bg-white p-4 opacity-72" data-progress-step="3">
-                      <div class="flex items-center gap-3">
-                        <span class="grid h-9 w-9 place-items-center rounded-lg bg-ink/8 text-ink/60"><i data-lucide="pen-line" class="h-4 w-4"></i></span>
-                        <div>
-                          <h2 class="text-sm font-semibold">生成剧本初稿</h2>
-                          <p class="mt-1 text-sm text-ink/56">转成场景、动作和对白。</p>
+                    <article class="rounded-lg border border-line bg-white p-4 opacity-75">
+                      <div class="flex items-start gap-3">
+                        <span class="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-mist text-slate">
+                          <i data-lucide="layout-list" class="h-4 w-4"></i>
+                        </span>
+                        <div class="min-w-0 flex-1">
+                          <h2 class="text-sm font-semibold">场景拆分阶段</h2>
+                          <p class="mt-1 text-sm text-slate">将章节拆分为剧本场景，建立场景与原文映射。</p>
                         </div>
-                        <span class="ml-auto text-xs text-ink/46">待开始</span>
                       </div>
                     </article>
-                    <article class="progress-item rounded-lg border border-line bg-white p-4 opacity-72" data-progress-step="4">
-                      <div class="flex items-center gap-3">
-                        <span class="grid h-9 w-9 place-items-center rounded-lg bg-ink/8 text-ink/60"><i data-lucide="shield-check" class="h-4 w-4"></i></span>
-                        <div>
-                          <h2 class="text-sm font-semibold">检查剧本格式</h2>
-                          <p class="mt-1 text-sm text-ink/56">检查角色、场景顺序和内容完整度。</p>
+                    <article class="rounded-lg border border-line bg-white p-4 opacity-75">
+                      <div class="flex items-start gap-3">
+                        <span class="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-mist text-slate">
+                          <i data-lucide="pen-line" class="h-4 w-4"></i>
+                        </span>
+                        <div class="min-w-0 flex-1">
+                          <h2 class="text-sm font-semibold">剧本生成与质量检查</h2>
+                          <p class="mt-1 text-sm text-slate">生成结构化剧本内容，检查人物一致性和格式规范。</p>
                         </div>
-                        <span class="ml-auto text-xs text-ink/46">待开始</span>
                       </div>
                     </article>
                   </div>
                 </div>
-              </div>
+              </section>
 
-              <aside class="border-t border-line bg-mist/70 p-5 lg:border-l lg:border-t-0">
-                <h2 class="text-base font-semibold">已识别内容</h2>
-                <div class="mt-4 space-y-3">
-                  <div class="rounded-lg border border-line bg-white p-4">
-                    <div class="mb-3 flex items-center gap-2 text-sm font-medium">
-                      <i data-lucide="users" class="h-4 w-4 text-moss"></i>
-                      角色
+              <aside class="space-y-5">
+                <section class="rounded-lg border border-line bg-white p-5 shadow-pane">
+                  <h2 class="font-semibold">实时指标</h2>
+                  <div class="mt-4 grid grid-cols-2 gap-3">
+                    <div class="rounded-lg border border-line bg-mist p-3">
+                      <div class="text-xs text-slate">已解析章节</div>
+                      <div class="mt-2 text-xl font-semibold">9 / 12</div>
                     </div>
-                    <div class="flex flex-wrap gap-2">
-                      <span class="rounded-full bg-moss/10 px-3 py-1 text-sm text-moss">林晚</span>
-                      <span class="rounded-full bg-coral/10 px-3 py-1 text-sm text-coral">陈伯</span>
-                      <span class="rounded-full bg-plum/10 px-3 py-1 text-sm text-plum">林远山</span>
+                    <div class="rounded-lg border border-line bg-mist p-3">
+                      <div class="text-xs text-slate">角色数量</div>
+                      <div class="mt-2 text-xl font-semibold">18</div>
+                    </div>
+                    <div class="rounded-lg border border-line bg-mist p-3">
+                      <div class="text-xs text-slate">场景数量</div>
+                      <div class="mt-2 text-xl font-semibold">24</div>
+                    </div>
+                    <div class="rounded-lg border border-line bg-mist p-3">
+                      <div class="text-xs text-slate">关系数量</div>
+                      <div class="mt-2 text-xl font-semibold">31</div>
                     </div>
                   </div>
-                  <div class="rounded-lg border border-line bg-white p-4">
-                    <div class="mb-3 flex items-center gap-2 text-sm font-medium">
-                      <i data-lucide="map" class="h-4 w-4 text-coral"></i>
-                      地点
+                </section>
+
+                <section class="rounded-lg border border-line bg-white p-5 shadow-pane">
+                  <h2 class="font-semibold">任务日志</h2>
+                  <div class="mt-4 space-y-3 text-sm">
+                    <div class="flex gap-3">
+                      <span class="mt-1 h-2 w-2 shrink-0 rounded-full bg-teal"></span>
+                      <div>
+                        <div class="font-medium">章节索引写入完成</div>
+                        <div class="text-xs text-slate">14:38:42</div>
+                      </div>
                     </div>
-                    <div class="space-y-2 text-sm text-ink/66">
-                      <div class="flex items-center justify-between"><span>旧书店</span><span>2 场</span></div>
-                      <div class="flex items-center justify-between"><span>雾港码头</span><span>1 场</span></div>
-                      <div class="flex items-center justify-between"><span>林家老宅</span><span>1 场</span></div>
+                    <div class="flex gap-3">
+                      <span class="mt-1 h-2 w-2 shrink-0 rounded-full bg-teal"></span>
+                      <div>
+                        <div class="font-medium">抽取 18 个角色候选</div>
+                        <div class="text-xs text-slate">14:41:16</div>
+                      </div>
+                    </div>
+                    <div class="flex gap-3">
+                      <span class="mt-1 h-2 w-2 shrink-0 rounded-full bg-amber"></span>
+                      <div>
+                        <div class="font-medium">发现 3 个重复姓名</div>
+                        <div class="text-xs text-slate">等待合并建议</div>
+                      </div>
                     </div>
                   </div>
-                  <div class="rounded-lg border border-line bg-white p-4">
-                    <div class="mb-3 flex items-center gap-2 text-sm font-medium">
-                      <i data-lucide="sparkle" class="h-4 w-4 text-sun"></i>
-                      生成预览
-                    </div>
-                    <p class="font-serif text-sm leading-7 text-ink/66">内景 旧书店 - 雨夜。林晚推门而入，门铃响起。陈伯从柜台后抬头，递出那封迟到七年的信。</p>
-                  </div>
-                </div>
-              </aside>
-            </div>
-          </div>
-        </section>
+                </section>
 
-        <section id="screen-workspace" class="screen">
-          <div class="rounded-lg border border-line bg-white/94 shadow-soft">
-            <div class="flex flex-col gap-3 border-b border-line px-5 py-4 xl:flex-row xl:items-center xl:justify-between">
-              <div>
-                <h1 class="text-xl font-semibold tracking-normal">雾港来信 · 剧本初稿</h1>
-                <p class="mt-1 text-sm text-ink/58">6 场 · 4 位角色 · 电影剧本</p>
-              </div>
-              <div class="flex flex-wrap items-center gap-2">
-                <button class="inline-flex h-10 items-center gap-2 rounded-lg border border-line bg-white px-3 text-sm font-medium hover:border-moss/60">
-                  <i data-lucide="undo-2" class="h-4 w-4"></i>
-                  撤销
-                </button>
-                <button class="inline-flex h-10 items-center gap-2 rounded-lg border border-line bg-white px-3 text-sm font-medium hover:border-moss/60">
-                  <i data-lucide="message-square-text" class="h-4 w-4"></i>
-                  AI 建议
-                </button>
-                <button class="inline-flex h-10 items-center gap-2 rounded-lg border border-line bg-white px-3 text-sm font-medium hover:border-moss/60" data-workspace-tab="yaml">
-                  <i data-lucide="download" class="h-4 w-4"></i>
-                  导出
-                </button>
-                <button class="inline-flex h-10 items-center gap-2 rounded-lg bg-moss px-4 text-sm font-medium text-white hover:bg-moss/92">
-                  <i data-lucide="save" class="h-4 w-4"></i>
-                  保存
-                </button>
-              </div>
-            </div>
-
-            <div class="border-b border-line bg-mist/70 px-5 py-3">
-              <div class="flex flex-wrap gap-2" role="tablist">
-                <button class="workspace-tab active h-9 rounded-lg border border-line bg-white px-3 text-sm font-medium" data-workspace-tab="script">剧本视图</button>
-                <button class="workspace-tab h-9 rounded-lg border border-line bg-white px-3 text-sm font-medium" data-workspace-tab="characters">角色表</button>
-                <button class="workspace-tab h-9 rounded-lg border border-line bg-white px-3 text-sm font-medium" data-workspace-tab="checks">格式检查</button>
-                <button class="workspace-tab h-9 rounded-lg border border-line bg-white px-3 text-sm font-medium" data-workspace-tab="yaml">高级导出</button>
-              </div>
-            </div>
-
-            <div id="workspace-script" class="workspace-panel grid min-h-[720px] lg:grid-cols-[286px_minmax(0,1fr)_340px]">
-              <aside class="border-b border-line bg-mist/70 p-4 lg:border-b-0 lg:border-r">
-                <div class="mb-3 flex items-center justify-between">
-                  <span class="text-sm font-semibold">场景</span>
-                  <button class="grid h-8 w-8 place-items-center rounded-lg border border-line bg-white text-ink/70" aria-label="新增场景">
-                    <i data-lucide="plus" class="h-4 w-4"></i>
-                  </button>
-                </div>
-                <div class="space-y-2">
-                  <button class="scene-card active w-full rounded-lg border border-line bg-white p-3 text-left">
-                    <div class="flex items-center justify-between">
-                      <span class="text-xs font-semibold text-moss">第 1 场</span>
-                      <span class="text-xs text-ink/48">雨夜</span>
-                    </div>
-                    <h2 class="mt-2 text-sm font-semibold">旧书店收到来信</h2>
-                    <p class="mt-2 line-clamp-2 text-xs leading-5 text-ink/58">林晚来到旧书店，陈伯交出父亲留下的信。</p>
-                  </button>
-                  <button class="scene-card w-full rounded-lg border border-line bg-white p-3 text-left">
-                    <div class="flex items-center justify-between">
-                      <span class="text-xs font-semibold text-coral">第 2 场</span>
-                      <span class="text-xs text-ink/48">清晨</span>
-                    </div>
-                    <h2 class="mt-2 text-sm font-semibold">林家老宅重启谜团</h2>
-                    <p class="mt-2 line-clamp-2 text-xs leading-5 text-ink/58">林晚翻出父亲笔记，发现码头编号。</p>
-                  </button>
-                  <button class="scene-card w-full rounded-lg border border-line bg-white p-3 text-left">
-                    <div class="flex items-center justify-between">
-                      <span class="text-xs font-semibold text-plum">第 3 场</span>
-                      <span class="text-xs text-ink/48">傍晚</span>
-                    </div>
-                    <h2 class="mt-2 text-sm font-semibold">雾港码头的旧船票</h2>
-                    <p class="mt-2 line-clamp-2 text-xs leading-5 text-ink/58">她在码头仓库找到通往海岛的线索。</p>
-                  </button>
-                </div>
-              </aside>
-
-              <article class="bg-paper p-5 md:p-8">
-                <div class="mx-auto max-w-3xl">
-                  <div class="mb-5 flex flex-col gap-3 rounded-lg border border-line bg-white p-4 md:flex-row md:items-center md:justify-between">
+                <section class="rounded-lg border border-rust/30 bg-white p-5 shadow-pane">
+                  <div class="flex items-start gap-3">
+                    <span class="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-rust/10 text-rust">
+                      <i data-lucide="triangle-alert" class="h-4 w-4"></i>
+                    </span>
                     <div>
-                      <label class="text-xs font-semibold uppercase text-ink/44" for="scene-heading">场景标题</label>
-                      <input id="scene-heading" value="内景 旧书店 - 雨夜" class="mt-1 h-10 w-full rounded-lg border border-line bg-paper px-3 text-sm font-semibold outline-none focus:border-moss md:w-[360px]" />
-                    </div>
-                    <div class="flex flex-wrap gap-2">
-                      <span class="rounded-full bg-moss/10 px-3 py-1 text-sm text-moss">林晚</span>
-                      <span class="rounded-full bg-coral/10 px-3 py-1 text-sm text-coral">陈伯</span>
-                    </div>
-                  </div>
-
-                  <div class="rounded-lg border border-line bg-white p-5 md:p-7">
-                    <div class="mb-7 text-center">
-                      <div class="text-sm font-bold tracking-normal text-ink">内景 旧书店 - 雨夜</div>
-                      <p class="mt-2 text-sm text-ink/56">林晚收到父亲留下的信，失踪七年的谜团重新打开。</p>
-                    </div>
-
-                    <div class="space-y-6 font-serif text-[15px] leading-8 text-ink">
-                      <p class="script-line" contenteditable="true">雨水敲打旧书店的玻璃窗。店内灯光昏黄，书架之间弥漫着潮湿纸张的气味。</p>
-                      <p class="script-line" contenteditable="true">门铃轻响。林晚收起伞，站在门口，衣角还在滴水。</p>
-
-                      <div class="mx-auto max-w-[420px] text-center">
-                        <div class="text-sm font-bold tracking-normal">陈伯</div>
-                        <p class="script-line mt-1 text-left" contenteditable="true">你终于来了。</p>
-                      </div>
-
-                      <p class="script-line" contenteditable="true">柜台后的老人从抽屉里取出一封信。信封泛黄，却没有任何邮戳。</p>
-
-                      <div class="mx-auto max-w-[420px] text-center">
-                        <div class="text-sm font-bold tracking-normal">林晚</div>
-                        <p class="script-line mt-1 text-left" contenteditable="true">这是哪里来的？</p>
-                      </div>
-
-                      <div class="mx-auto max-w-[420px] text-center">
-                        <div class="text-sm font-bold tracking-normal">陈伯</div>
-                        <p class="script-line mt-1 text-left" contenteditable="true">你父亲七年前留下的。他说，雾起的时候，才能交给你。</p>
-                      </div>
-
-                      <p class="script-line" contenteditable="true">林晚盯着信封上的字迹，指尖慢慢收紧。</p>
-
-                      <div class="text-right font-sans text-sm font-bold text-ink/70">切至：</div>
-                    </div>
-                  </div>
-                </div>
-              </article>
-
-              <aside class="border-t border-line bg-mist/70 p-4 lg:border-l lg:border-t-0">
-                <section class="rounded-lg border border-line bg-white p-4">
-                  <div class="mb-3 flex items-center justify-between">
-                    <h2 class="text-sm font-semibold">AI 建议</h2>
-                    <span class="rounded-full bg-sun/16 px-2 py-1 text-xs text-ink/70">3 条</span>
-                  </div>
-                  <div class="space-y-3">
-                    <div class="rounded-lg border border-line bg-paper p-3">
-                      <div class="mb-2 flex items-center gap-2 text-sm font-medium">
-                        <i data-lucide="zap" class="h-4 w-4 text-coral"></i>
-                        增强冲突
-                      </div>
-                      <p class="text-sm leading-6 text-ink/62">陈伯可以先拒绝交信，让林晚主动逼问，场面会更有张力。</p>
-                      <div class="mt-3 flex gap-2">
-                        <button class="h-8 rounded-lg bg-moss px-3 text-xs font-medium text-white">采纳</button>
-                        <button class="h-8 rounded-lg border border-line bg-white px-3 text-xs font-medium">暂不</button>
-                      </div>
-                    </div>
-                    <div class="rounded-lg border border-line bg-paper p-3">
-                      <div class="mb-2 flex items-center gap-2 text-sm font-medium">
-                        <i data-lucide="message-circle" class="h-4 w-4 text-moss"></i>
-                        对白微调
-                      </div>
-                      <p class="text-sm leading-6 text-ink/62">林晚第一句对白可以更短，保留她的震惊。</p>
-                    </div>
-                  </div>
-                </section>
-
-                <section class="mt-4 rounded-lg border border-line bg-white p-4">
-                  <h2 class="text-sm font-semibold">本场角色</h2>
-                  <div class="mt-3 space-y-3">
-                    <div class="flex items-center gap-3">
-                      <span class="grid h-10 w-10 place-items-center rounded-lg bg-moss/12 text-moss">林</span>
-                      <div>
-                        <div class="text-sm font-medium">林晚</div>
-                        <div class="text-xs text-ink/54">主角 · 调查父亲失踪</div>
-                      </div>
-                    </div>
-                    <div class="flex items-center gap-3">
-                      <span class="grid h-10 w-10 place-items-center rounded-lg bg-coral/12 text-coral">陈</span>
-                      <div>
-                        <div class="text-sm font-medium">陈伯</div>
-                        <div class="text-xs text-ink/54">旧书店老板 · 知情者</div>
-                      </div>
+                      <h2 class="font-semibold">失败重试入口</h2>
+                      <p class="mt-2 text-sm leading-6 text-slate">模型调用超时会保留已完成阶段，可从当前阶段重试。</p>
                     </div>
                   </div>
                 </section>
               </aside>
             </div>
+          </section>
 
-            <div id="workspace-characters" class="workspace-panel hidden min-h-[720px] bg-paper p-5 md:p-8">
-              <div class="mx-auto max-w-5xl">
-                <div class="mb-5 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                  <div>
-                    <h2 class="text-lg font-semibold">角色表</h2>
-                    <p class="mt-1 text-sm text-ink/58">4 位角色 · 6 条关系</p>
-                  </div>
-                  <button class="inline-flex h-10 items-center gap-2 rounded-lg bg-moss px-4 text-sm font-medium text-white">
-                    <i data-lucide="user-plus" class="h-4 w-4"></i>
-                    添加角色
+          <section id="screen-workspace" class="app-screen">
+            <section class="rounded-lg border border-line bg-white shadow-pane">
+              <div class="flex flex-col gap-3 border-b border-line px-5 py-4 xl:flex-row xl:items-center xl:justify-between">
+                <div>
+                  <h1 class="text-xl font-semibold">雾港来信 · 剧本修改工作台</h1>
+                  <p class="mt-1 text-sm text-slate">6 场 · 4 位角色 · 自动保存于 14:32</p>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                  <button class="grid h-10 w-10 place-items-center rounded-lg border border-line bg-white" aria-label="撤销">
+                    <i data-lucide="undo-2" class="h-4 w-4"></i>
+                  </button>
+                  <button class="grid h-10 w-10 place-items-center rounded-lg border border-line bg-white" aria-label="重做">
+                    <i data-lucide="redo-2" class="h-4 w-4"></i>
+                  </button>
+                  <button class="grid h-10 w-10 place-items-center rounded-lg border border-line bg-white" aria-label="查找替换">
+                    <i data-lucide="search" class="h-4 w-4"></i>
+                  </button>
+                  <button class="grid h-10 w-10 place-items-center rounded-lg border border-line bg-white" aria-label="保存版本" data-open-version>
+                    <i data-lucide="history" class="h-4 w-4"></i>
+                  </button>
+                  <button class="inline-flex h-10 items-center gap-2 rounded-lg bg-teal px-4 text-sm font-medium text-white" data-open-export>
+                    <i data-lucide="download" class="h-4 w-4"></i>
+                    导出
                   </button>
                 </div>
+              </div>
 
-                <div class="grid gap-4 md:grid-cols-2">
-                  <article class="rounded-lg border border-line bg-white p-5">
-                    <div class="flex items-start gap-4">
-                      <span class="grid h-12 w-12 shrink-0 place-items-center rounded-lg bg-moss/12 text-lg font-semibold text-moss">林</span>
-                      <div class="min-w-0">
-                        <div class="flex items-center gap-2">
-                          <h3 class="font-semibold">林晚</h3>
-                          <span class="rounded-full bg-moss/10 px-2 py-0.5 text-xs text-moss">主角</span>
-                        </div>
-                        <p class="mt-2 text-sm leading-6 text-ink/64">28 岁，记者。冷静敏感，因父亲失踪重新回到雾港。</p>
-                        <div class="mt-3 flex flex-wrap gap-2 text-xs">
-                          <span class="rounded-full bg-mist px-2 py-1">敏锐</span>
-                          <span class="rounded-full bg-mist px-2 py-1">克制</span>
-                          <span class="rounded-full bg-mist px-2 py-1">执着</span>
-                        </div>
-                      </div>
-                    </div>
-                  </article>
-                  <article class="rounded-lg border border-line bg-white p-5">
-                    <div class="flex items-start gap-4">
-                      <span class="grid h-12 w-12 shrink-0 place-items-center rounded-lg bg-coral/12 text-lg font-semibold text-coral">陈</span>
-                      <div class="min-w-0">
-                        <div class="flex items-center gap-2">
-                          <h3 class="font-semibold">陈伯</h3>
-                          <span class="rounded-full bg-coral/10 px-2 py-0.5 text-xs text-coral">知情者</span>
-                        </div>
-                        <p class="mt-2 text-sm leading-6 text-ink/64">旧书店老板，守着林远山留下的线索，对林晚既保护又隐瞒。</p>
-                        <div class="mt-3 flex flex-wrap gap-2 text-xs">
-                          <span class="rounded-full bg-mist px-2 py-1">谨慎</span>
-                          <span class="rounded-full bg-mist px-2 py-1">内疚</span>
-                          <span class="rounded-full bg-mist px-2 py-1">守信</span>
-                        </div>
-                      </div>
-                    </div>
-                  </article>
-                  <article class="rounded-lg border border-line bg-white p-5">
-                    <div class="flex items-start gap-4">
-                      <span class="grid h-12 w-12 shrink-0 place-items-center rounded-lg bg-plum/12 text-lg font-semibold text-plum">林</span>
-                      <div class="min-w-0">
-                        <div class="flex items-center gap-2">
-                          <h3 class="font-semibold">林远山</h3>
-                          <span class="rounded-full bg-plum/10 px-2 py-0.5 text-xs text-plum">失踪者</span>
-                        </div>
-                        <p class="mt-2 text-sm leading-6 text-ink/64">林晚的父亲，七年前在调查海上走私案时失踪。</p>
-                        <div class="mt-3 flex flex-wrap gap-2 text-xs">
-                          <span class="rounded-full bg-mist px-2 py-1">坚定</span>
-                          <span class="rounded-full bg-mist px-2 py-1">隐忍</span>
-                          <span class="rounded-full bg-mist px-2 py-1">秘密重重</span>
-                        </div>
-                      </div>
-                    </div>
-                  </article>
-                  <article class="rounded-lg border border-line bg-white p-5">
-                    <div class="flex items-start gap-4">
-                      <span class="grid h-12 w-12 shrink-0 place-items-center rounded-lg bg-sun/18 text-lg font-semibold text-ink">周</span>
-                      <div class="min-w-0">
-                        <div class="flex items-center gap-2">
-                          <h3 class="font-semibold">周砚</h3>
-                          <span class="rounded-full bg-sun/18 px-2 py-0.5 text-xs text-ink/70">旧友</span>
-                        </div>
-                        <p class="mt-2 text-sm leading-6 text-ink/64">码头修船师，林晚儿时朋友，知道父亲最后出现的地点。</p>
-                        <div class="mt-3 flex flex-wrap gap-2 text-xs">
-                          <span class="rounded-full bg-mist px-2 py-1">沉默</span>
-                          <span class="rounded-full bg-mist px-2 py-1">可靠</span>
-                          <span class="rounded-full bg-mist px-2 py-1">犹豫</span>
-                        </div>
-                      </div>
-                    </div>
-                  </article>
+              <div class="border-b border-line bg-mist px-5 py-3">
+                <div class="flex flex-wrap gap-2" role="tablist">
+                  <button class="segmented-item active h-9 rounded-lg border border-line bg-white px-3 text-sm font-medium" data-workspace-panel="main">主工作台</button>
+                  <button class="segmented-item h-9 rounded-lg border border-line bg-white px-3 text-sm font-medium" data-screen-link="roles">角色工作台</button>
+                  <button class="segmented-item h-9 rounded-lg border border-line bg-white px-3 text-sm font-medium" data-screen-link="agent">Agent 心流</button>
+                  <button class="segmented-item h-9 rounded-lg border border-line bg-white px-3 text-sm font-medium" data-workspace-panel="yaml">YAML</button>
                 </div>
               </div>
-            </div>
 
-            <div id="workspace-checks" class="workspace-panel hidden min-h-[720px] bg-paper p-5 md:p-8">
-              <div class="mx-auto max-w-5xl">
-                <div class="mb-5 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                  <div>
-                    <h2 class="text-lg font-semibold">格式检查</h2>
-                    <p class="mt-1 text-sm text-ink/58">2 条建议 · 1 条需要确认</p>
-                  </div>
-                  <button class="inline-flex h-10 items-center gap-2 rounded-lg bg-moss px-4 text-sm font-medium text-white">
-                    <i data-lucide="shield-check" class="h-4 w-4"></i>
-                    重新检查
-                  </button>
-                </div>
+              <div id="workspace-main" class="workspace-panel active">
+                <div class="workspace-grid grid min-h-[760px] grid-cols-[292px_minmax(0,1fr)_360px]">
+                  <aside class="border-b border-line bg-mist p-4 lg:border-b-0 lg:border-r">
+                    <div class="mb-3 flex items-center justify-between">
+                      <h2 class="text-sm font-semibold">场次列表</h2>
+                      <div class="flex gap-2">
+                        <button class="grid h-8 w-8 place-items-center rounded-lg border border-line bg-white" aria-label="新增场次">
+                          <i data-lucide="plus" class="h-4 w-4"></i>
+                        </button>
+                        <button class="grid h-8 w-8 place-items-center rounded-lg border border-line bg-white" aria-label="调整顺序">
+                          <i data-lucide="grip-vertical" class="h-4 w-4"></i>
+                        </button>
+                      </div>
+                    </div>
 
-                <div class="space-y-3">
-                  <article class="rounded-lg border border-coral/35 bg-white p-4">
-                    <div class="flex items-start gap-3">
-                      <span class="grid h-9 w-9 place-items-center rounded-lg bg-coral/12 text-coral"><i data-lucide="alert-circle" class="h-4 w-4"></i></span>
-                      <div class="min-w-0 flex-1">
-                        <h3 class="text-sm font-semibold">第 3 场出现了一个未登记角色</h3>
-                        <p class="mt-1 text-sm text-ink/62">“周砚”已经在对白中出现，但还没有加入角色表。</p>
-                        <div class="mt-3 flex flex-wrap gap-2">
-                          <button class="h-8 rounded-lg bg-moss px-3 text-xs font-medium text-white">加入角色表</button>
-                          <button class="h-8 rounded-lg border border-line bg-white px-3 text-xs font-medium">稍后处理</button>
+                    <div class="space-y-2">
+                      <button class="scene-card active w-full rounded-lg border border-line bg-white p-3 text-left">
+                        <div class="flex items-center justify-between">
+                          <span class="text-xs font-semibold text-teal">第 1 场</span>
+                          <span class="rounded-full bg-amber/14 px-2 py-1 text-[11px] text-ink/70">有建议</span>
+                        </div>
+                        <h3 class="mt-2 text-sm font-semibold">旧书店收到来信</h3>
+                        <div class="mt-2 flex flex-wrap gap-1 text-[11px] text-slate">
+                          <span>内景</span>
+                          <span>旧书店</span>
+                          <span>雨夜</span>
+                        </div>
+                        <p class="mt-2 line-clamp-2 text-xs leading-5 text-slate">林晚来到旧书店，陈伯交出父亲留下的信。</p>
+                        <div class="mt-3 flex items-center justify-between text-[11px] text-slate">
+                          <span>林晚、陈伯</span>
+                          <span>642 字</span>
+                        </div>
+                      </button>
+                      <button class="scene-card w-full rounded-lg border border-line bg-white p-3 text-left">
+                        <div class="flex items-center justify-between">
+                          <span class="text-xs font-semibold text-rust">第 2 场</span>
+                          <span class="rounded-full bg-mist px-2 py-1 text-[11px] text-slate">待修改</span>
+                        </div>
+                        <h3 class="mt-2 text-sm font-semibold">林家老宅重启谜团</h3>
+                        <div class="mt-2 flex flex-wrap gap-1 text-[11px] text-slate">
+                          <span>内景</span>
+                          <span>老宅</span>
+                          <span>清晨</span>
+                        </div>
+                        <p class="mt-2 line-clamp-2 text-xs leading-5 text-slate">林晚翻出父亲笔记，发现码头编号。</p>
+                        <div class="mt-3 flex items-center justify-between text-[11px] text-slate">
+                          <span>林晚</span>
+                          <span>518 字</span>
+                        </div>
+                      </button>
+                      <button class="scene-card w-full rounded-lg border border-line bg-white p-3 text-left">
+                        <div class="flex items-center justify-between">
+                          <span class="text-xs font-semibold text-violet">第 3 场</span>
+                          <span class="rounded-full bg-teal/10 px-2 py-1 text-[11px] text-teal">已确认</span>
+                        </div>
+                        <h3 class="mt-2 text-sm font-semibold">雾港码头的旧船票</h3>
+                        <div class="mt-2 flex flex-wrap gap-1 text-[11px] text-slate">
+                          <span>外景</span>
+                          <span>码头</span>
+                          <span>傍晚</span>
+                        </div>
+                        <p class="mt-2 line-clamp-2 text-xs leading-5 text-slate">周砚在仓库里承认见过林远山。</p>
+                        <div class="mt-3 flex items-center justify-between text-[11px] text-slate">
+                          <span>林晚、周砚</span>
+                          <span>731 字</span>
+                        </div>
+                      </button>
+                    </div>
+
+                    <div class="mt-4 grid grid-cols-3 gap-2">
+                      <button class="h-9 rounded-lg border border-line bg-white text-xs font-medium">合并</button>
+                      <button class="h-9 rounded-lg border border-line bg-white text-xs font-medium">拆分</button>
+                      <button class="h-9 rounded-lg border border-line bg-white text-xs font-medium">删除</button>
+                    </div>
+                  </aside>
+
+                  <article class="bg-paper p-5 md:p-7">
+                    <div class="mx-auto max-w-3xl">
+                      <div class="mb-4 grid gap-3 rounded-lg border border-line bg-white p-4 md:grid-cols-[minmax(0,1fr)_220px] md:items-center">
+                        <label class="block">
+                          <span class="text-xs font-semibold uppercase text-slate">场景标题</span>
+                          <input class="mt-1 h-10 w-full rounded-lg border border-line bg-paper px-3 text-sm font-semibold outline-none focus:border-teal" value="内景 旧书店 - 雨夜" />
+                        </label>
+                        <select class="h-10 rounded-lg border border-line bg-paper px-3 text-sm outline-none focus:border-teal">
+                          <option>待修改</option>
+                          <option>已确认</option>
+                          <option>需要重写</option>
+                        </select>
+                      </div>
+
+                      <div class="rounded-lg border border-line bg-white p-5 md:p-7">
+                        <div class="mb-7 text-center">
+                          <div class="text-sm font-bold">内景 旧书店 - 雨夜</div>
+                          <p class="mt-2 text-sm text-slate">林晚收到父亲留下的信，失踪七年的谜团重新打开。</p>
+                        </div>
+
+                        <div class="space-y-6 font-script text-[15px] leading-8 text-ink">
+                          <p class="script-line" contenteditable="true">雨水敲打旧书店的玻璃窗。店内灯光昏黄，书架之间弥漫着潮湿纸张的气味。</p>
+                          <p class="script-line" contenteditable="true">门铃轻响。林晚收起伞，站在门口，衣角还在滴水。</p>
+
+                          <div class="mx-auto max-w-[430px] text-center">
+                            <div class="text-sm font-bold">陈伯</div>
+                            <p class="script-line mt-1 text-left" contenteditable="true">你终于来了。</p>
+                          </div>
+
+                          <p class="script-line" contenteditable="true">柜台后的老人从抽屉里取出一封信。信封泛黄，却没有任何邮戳。</p>
+
+                          <div class="mx-auto max-w-[430px] text-center">
+                            <div class="text-sm font-bold">林晚</div>
+                            <p class="script-line mt-1 text-left" contenteditable="true">这是哪里来的？</p>
+                          </div>
+
+                          <div class="mx-auto max-w-[430px] text-center">
+                            <div class="text-sm font-bold">陈伯</div>
+                            <p class="script-line mt-1 text-left" contenteditable="true">你父亲七年前留下的。他说，雾起的时候，才能交给你。</p>
+                          </div>
+
+                          <p class="script-line" contenteditable="true">林晚盯着信封上的字迹，指尖慢慢收紧。</p>
+                          <div class="text-right font-sans text-sm font-bold text-slate">切至：</div>
+                        </div>
+                      </div>
+
+                      <div class="mt-4 rounded-lg border border-line bg-white p-3">
+                        <div class="flex flex-wrap gap-2">
+                          <button class="inline-flex h-9 items-center gap-2 rounded-lg border border-line bg-paper px-3 text-xs font-medium">
+                            <i data-lucide="sparkles" class="h-4 w-4"></i>
+                            润色对白
+                          </button>
+                          <button class="inline-flex h-9 items-center gap-2 rounded-lg border border-line bg-paper px-3 text-xs font-medium">
+                            <i data-lucide="flame" class="h-4 w-4"></i>
+                            增强冲突
+                          </button>
+                          <button class="inline-flex h-9 items-center gap-2 rounded-lg border border-line bg-paper px-3 text-xs font-medium">
+                            <i data-lucide="scissors" class="h-4 w-4"></i>
+                            缩短场景
+                          </button>
+                          <button class="inline-flex h-9 items-center gap-2 rounded-lg border border-line bg-paper px-3 text-xs font-medium">
+                            <i data-lucide="film" class="h-4 w-4"></i>
+                            更影视化
+                          </button>
                         </div>
                       </div>
                     </div>
                   </article>
-                  <article class="rounded-lg border border-line bg-white p-4">
-                    <div class="flex items-start gap-3">
-                      <span class="grid h-9 w-9 place-items-center rounded-lg bg-sun/18 text-ink"><i data-lucide="info" class="h-4 w-4"></i></span>
-                      <div class="min-w-0 flex-1">
-                        <h3 class="text-sm font-semibold">第 2 场对白较少</h3>
-                        <p class="mt-1 text-sm text-ink/62">这一场以动作和回忆为主，可以补一段林晚与母亲的电话。</p>
-                      </div>
+
+                  <aside class="border-t border-line bg-mist p-4 lg:border-l lg:border-t-0">
+                    <div class="space-y-4">
+                      <section class="rounded-lg border border-line bg-white p-4">
+                        <div class="flex items-center justify-between">
+                          <h2 class="text-sm font-semibold">当前场景角色</h2>
+                          <button class="grid h-8 w-8 place-items-center rounded-lg border border-line" aria-label="插入角色名">
+                            <i data-lucide="user-round-plus" class="h-4 w-4"></i>
+                          </button>
+                        </div>
+                        <div class="mt-3 space-y-3">
+                          <button class="flex w-full items-center gap-3 rounded-lg border border-line bg-paper p-3 text-left">
+                            <span class="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-teal/12 text-sm font-semibold text-teal">林</span>
+                            <span class="min-w-0">
+                              <span class="block text-sm font-medium">林晚</span>
+                              <span class="block truncate text-xs text-slate">意图：确认父亲留下的线索</span>
+                            </span>
+                          </button>
+                          <button class="flex w-full items-center gap-3 rounded-lg border border-line bg-paper p-3 text-left">
+                            <span class="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-rust/12 text-sm font-semibold text-rust">陈</span>
+                            <span class="min-w-0">
+                              <span class="block text-sm font-medium">陈伯</span>
+                              <span class="block truncate text-xs text-slate">情绪：谨慎、内疚、试探</span>
+                            </span>
+                          </button>
+                        </div>
+                      </section>
+
+                      <section class="rounded-lg border border-line bg-white p-4">
+                        <div class="flex items-center justify-between">
+                          <h2 class="text-sm font-semibold">AI 建议</h2>
+                          <span class="rounded-full bg-amber/14 px-2 py-1 text-xs text-ink/70">3 条</span>
+                        </div>
+                        <div class="mt-3 space-y-3">
+                          <article class="rounded-lg border border-line bg-paper p-3">
+                            <div class="flex items-center gap-2 text-sm font-medium">
+                              <i data-lucide="zap" class="h-4 w-4 text-rust"></i>
+                              增强冲突
+                            </div>
+                            <p class="mt-2 text-sm leading-6 text-slate">问题：陈伯交信过快。原因：他掌握秘密却缺少犹豫。建议：增加一次拒绝和林晚追问。</p>
+                            <div class="mt-3 flex gap-2">
+                              <button class="suggestion-apply h-8 rounded-lg bg-teal px-3 text-xs font-medium text-white">采纳</button>
+                              <button class="h-8 rounded-lg border border-line bg-white px-3 text-xs font-medium">忽略</button>
+                            </div>
+                          </article>
+                          <article class="rounded-lg border border-line bg-paper p-3">
+                            <div class="flex items-center gap-2 text-sm font-medium">
+                              <i data-lucide="message-circle" class="h-4 w-4 text-teal"></i>
+                              人物语气
+                            </div>
+                            <p class="mt-2 text-sm leading-6 text-slate">林晚第一句对白可更短，保留震惊感。</p>
+                          </article>
+                        </div>
+                      </section>
+
+                      <section class="rounded-lg border border-line bg-white p-4">
+                        <h2 class="text-sm font-semibold">原文参考</h2>
+                        <p class="mt-3 rounded-lg border border-line bg-paper p-3 font-script text-sm leading-7 text-slate">“你父亲留下了一封信。”老人说。信封上没有邮戳，只有熟悉的字迹：给林晚，雾起时启。</p>
+                        <div class="mt-3 flex items-center justify-between text-xs text-slate">
+                          <span>第一章 · 段落 12-15</span>
+                          <button class="font-medium text-teal">重新检索</button>
+                        </div>
+                      </section>
+
+                      <section class="rounded-lg border border-line bg-white p-4">
+                        <h2 class="text-sm font-semibold">场景结构</h2>
+                        <dl class="mt-3 space-y-2 text-sm">
+                          <div class="flex justify-between gap-3">
+                            <dt class="text-slate">场景目标</dt>
+                            <dd class="text-right font-medium">得到父亲线索</dd>
+                          </div>
+                          <div class="flex justify-between gap-3">
+                            <dt class="text-slate">主要冲突</dt>
+                            <dd class="text-right font-medium">陈伯隐瞒信息</dd>
+                          </div>
+                          <div class="flex justify-between gap-3">
+                            <dt class="text-slate">转折点</dt>
+                            <dd class="text-right font-medium">信封字迹确认</dd>
+                          </div>
+                          <div class="flex justify-between gap-3">
+                            <dt class="text-slate">剧情线</dt>
+                            <dd class="text-right font-medium">父亲失踪案</dd>
+                          </div>
+                        </dl>
+                      </section>
                     </div>
-                  </article>
-                  <article class="rounded-lg border border-line bg-white p-4">
-                    <div class="flex items-start gap-3">
-                      <span class="grid h-9 w-9 place-items-center rounded-lg bg-moss/12 text-moss"><i data-lucide="check" class="h-4 w-4"></i></span>
-                      <div class="min-w-0 flex-1">
-                        <h3 class="text-sm font-semibold">场景顺序完整</h3>
-                        <p class="mt-1 text-sm text-ink/62">6 场戏已按故事顺序排列。</p>
-                      </div>
-                    </div>
-                  </article>
+                  </aside>
                 </div>
               </div>
-            </div>
 
-            <div id="workspace-yaml" class="workspace-panel hidden min-h-[720px] bg-paper p-5 md:p-8">
-              <div class="mx-auto max-w-6xl">
-                <div class="mb-5 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                  <div>
-                    <h2 class="text-lg font-semibold">高级导出</h2>
-                    <p class="mt-1 text-sm text-ink/58">结构化剧本文件 · YAML</p>
-                  </div>
-                  <div class="flex flex-wrap gap-2">
-                    <button class="inline-flex h-10 items-center gap-2 rounded-lg border border-line bg-white px-3 text-sm font-medium">
-                      <i data-lucide="copy" class="h-4 w-4"></i>
-                      复制
-                    </button>
-                    <button class="inline-flex h-10 items-center gap-2 rounded-lg bg-ink px-4 text-sm font-medium text-paper">
-                      <i data-lucide="download" class="h-4 w-4"></i>
-                      下载 YAML
-                    </button>
-                  </div>
-                </div>
-
-                <div class="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
+              <div id="workspace-yaml" class="workspace-panel bg-paper p-5">
+                <div class="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
                   <div class="overflow-hidden rounded-lg border border-line bg-ink">
                     <div class="flex items-center justify-between border-b border-white/10 px-4 py-3">
                       <span class="text-sm font-semibold text-paper">screenplay.yaml</span>
-                      <span class="rounded-full bg-moss/25 px-2 py-1 text-xs text-paper">已通过检查</span>
+                      <span class="rounded-full bg-teal/25 px-2 py-1 text-xs text-paper">Schema valid</span>
                     </div>
-                    <pre class="max-h-[560px] overflow-auto p-5 text-sm leading-7 text-[#F7F1DE]"><code>metadata:
+                    <pre class="scrollbar-thin max-h-[680px] overflow-auto p-5 text-sm leading-7 text-[#f7f1de]"><code>metadata:
   title: "雾港来信"
-  author: "佚名"
-  version: "1.0"
-  original_novel: "雾港来信"
-  logline: "一名记者在父亲失踪七年后收到一封信，回到雾港追查被掩埋的真相。"
-  genre: ["悬疑", "剧情"]
-  source_chapters: [1, 2, 3]
+  target_format: "影视剧本"
+  adaptation_style: "忠于原作"
+  version: "v1.4"
+
+source_index:
+  chapters: [1, 2, 3]
+  paragraph_range: "12-15"
+  confidence: 0.91
 
 characters:
   - id: "char_001"
     name: "林晚"
-    intro: "28岁，记者，因父亲失踪重新回到雾港。"
-    personality: ["敏锐", "克制", "执着"]
+    role_type: "主角"
+    desire: "查清父亲失踪真相"
+    voice_style: "克制、短句、追问明确"
+  - id: "char_002"
+    name: "陈伯"
+    role_type: "知情者"
+    fear: "泄露林远山留下的秘密"
 
 scenes:
   - id: "scene_001"
     sequence: 1
     heading: "内景 旧书店 - 雨夜"
-    setting:
-      location: "旧书店"
-      time: "雨夜"
-      interior: true
-    synopsis: "林晚收到父亲留下的信，失踪七年的谜团重新打开。"
-    characters_present: ["char_001", "char_002"]
+    status: "待修改"
+    source:
+      chapter: 1
+      paragraphs: [12, 13, 14, 15]
+    structure:
+      goal: "林晚获得父亲留下的信"
+      conflict: "陈伯想确认她是否已经准备好知道真相"
+      turning_point: "林晚认出父亲字迹"
     content:
       - type: action
         text: "雨水敲打旧书店的玻璃窗。"
@@ -861,115 +1151,701 @@ scenes:
 
                   <aside class="space-y-4">
                     <section class="rounded-lg border border-line bg-white p-4">
-                      <h3 class="text-sm font-semibold">导出用途</h3>
-                      <div class="mt-3 space-y-2">
-                        <button class="format-tab active flex h-10 w-full items-center justify-between rounded-lg border border-line bg-white px-3 text-sm">
-                          后续编辑
-                          <i data-lucide="pencil" class="h-4 w-4"></i>
-                        </button>
-                        <button class="format-tab flex h-10 w-full items-center justify-between rounded-lg border border-line bg-white px-3 text-sm">
-                          团队交付
-                          <i data-lucide="send" class="h-4 w-4"></i>
-                        </button>
-                        <button class="format-tab flex h-10 w-full items-center justify-between rounded-lg border border-line bg-white px-3 text-sm">
-                          技术校验
-                          <i data-lucide="braces" class="h-4 w-4"></i>
-                        </button>
-                      </div>
+                      <h2 class="text-sm font-semibold">Schema 检查</h2>
+                      <ul class="mt-3 space-y-2 text-sm text-slate">
+                        <li class="flex gap-2"><i data-lucide="check" class="mt-0.5 h-4 w-4 text-teal"></i>场景 ID 唯一</li>
+                        <li class="flex gap-2"><i data-lucide="check" class="mt-0.5 h-4 w-4 text-teal"></i>角色引用完整</li>
+                        <li class="flex gap-2"><i data-lucide="check" class="mt-0.5 h-4 w-4 text-teal"></i>原文索引完整</li>
+                        <li class="flex gap-2"><i data-lucide="check" class="mt-0.5 h-4 w-4 text-teal"></i>修改历史已绑定</li>
+                      </ul>
                     </section>
                     <section class="rounded-lg border border-line bg-white p-4">
-                      <h3 class="text-sm font-semibold">检查结果</h3>
-                      <ul class="mt-3 space-y-2 text-sm text-ink/64">
-                        <li class="flex gap-2"><i data-lucide="check" class="mt-0.5 h-4 w-4 text-moss"></i>角色引用完整</li>
-                        <li class="flex gap-2"><i data-lucide="check" class="mt-0.5 h-4 w-4 text-moss"></i>场景顺序完整</li>
-                        <li class="flex gap-2"><i data-lucide="check" class="mt-0.5 h-4 w-4 text-moss"></i>包含 3 个以上章节来源</li>
-                      </ul>
+                      <h2 class="text-sm font-semibold">同步状态</h2>
+                      <div class="mt-3 space-y-2 text-sm">
+                        <div class="flex items-center justify-between">
+                          <span class="text-slate">富文本</span>
+                          <span class="font-medium text-teal">已同步</span>
+                        </div>
+                        <div class="flex items-center justify-between">
+                          <span class="text-slate">结构化数据</span>
+                          <span class="font-medium text-teal">已同步</span>
+                        </div>
+                        <div class="flex items-center justify-between">
+                          <span class="text-slate">原文索引</span>
+                          <span class="font-medium text-teal">已同步</span>
+                        </div>
+                      </div>
                     </section>
                   </aside>
                 </div>
               </div>
+            </section>
+          </section>
+
+          <section id="screen-roles" class="app-screen">
+            <section class="rounded-lg border border-line bg-white shadow-pane">
+              <div class="flex flex-col gap-3 border-b border-line px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <h1 class="text-xl font-semibold">角色工作台</h1>
+                  <p class="mt-1 text-sm text-slate">角色档案、人物关系、出场统计和更新建议</p>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                  <button class="inline-flex h-10 items-center gap-2 rounded-lg border border-line bg-white px-3 text-sm font-medium">
+                    <i data-lucide="merge" class="h-4 w-4"></i>
+                    合并重复
+                  </button>
+                  <button class="inline-flex h-10 items-center gap-2 rounded-lg bg-teal px-4 text-sm font-medium text-white">
+                    <i data-lucide="user-plus" class="h-4 w-4"></i>
+                    新增角色
+                  </button>
+                </div>
+              </div>
+
+              <div class="role-grid grid min-h-[760px] grid-cols-[292px_minmax(0,1fr)_360px]">
+                <aside class="border-b border-line bg-mist p-4 lg:border-b-0 lg:border-r">
+                  <div class="mb-3 flex gap-2">
+                    <label class="relative flex-1">
+                      <i data-lucide="search" class="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate"></i>
+                      <input class="h-9 w-full rounded-lg border border-line bg-white pl-9 pr-3 text-sm outline-none focus:border-teal" value="林" />
+                    </label>
+                    <button class="grid h-9 w-9 place-items-center rounded-lg border border-line bg-white" aria-label="排序角色">
+                      <i data-lucide="arrow-up-down" class="h-4 w-4"></i>
+                    </button>
+                  </div>
+
+                  <div class="space-y-2">
+                    <button class="role-card active flex w-full gap-3 rounded-lg border border-line bg-white p-3 text-left">
+                      <span class="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-teal/12 font-semibold text-teal">林</span>
+                      <span class="min-w-0 flex-1">
+                        <span class="flex items-center justify-between gap-2">
+                          <span class="font-medium">林晚</span>
+                          <span class="text-xs text-teal">主角</span>
+                        </span>
+                        <span class="mt-1 block truncate text-xs text-slate">出场 6 次 · 首次第 1 场</span>
+                      </span>
+                    </button>
+                    <button class="role-card flex w-full gap-3 rounded-lg border border-line bg-white p-3 text-left">
+                      <span class="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-rust/12 font-semibold text-rust">陈</span>
+                      <span class="min-w-0 flex-1">
+                        <span class="flex items-center justify-between gap-2">
+                          <span class="font-medium">陈伯</span>
+                          <span class="text-xs text-rust">知情者</span>
+                        </span>
+                        <span class="mt-1 block truncate text-xs text-slate">出场 2 次 · 设定需确认</span>
+                      </span>
+                    </button>
+                    <button class="role-card flex w-full gap-3 rounded-lg border border-line bg-white p-3 text-left">
+                      <span class="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-violet/12 font-semibold text-violet">林</span>
+                      <span class="min-w-0 flex-1">
+                        <span class="flex items-center justify-between gap-2">
+                          <span class="font-medium">林远山</span>
+                          <span class="text-xs text-violet">失踪者</span>
+                        </span>
+                        <span class="mt-1 block truncate text-xs text-slate">出场 1 次 · 回忆角色</span>
+                      </span>
+                    </button>
+                    <button class="role-card flex w-full gap-3 rounded-lg border border-line bg-white p-3 text-left">
+                      <span class="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-amber/14 font-semibold text-ink">周</span>
+                      <span class="min-w-0 flex-1">
+                        <span class="flex items-center justify-between gap-2">
+                          <span class="font-medium">周砚</span>
+                          <span class="text-xs text-ink/70">旧友</span>
+                        </span>
+                        <span class="mt-1 block truncate text-xs text-slate">出场 2 次 · 第 3 场</span>
+                      </span>
+                    </button>
+                  </div>
+                </aside>
+
+                <article class="bg-paper p-5">
+                  <div class="mx-auto max-w-3xl">
+                    <div class="rounded-lg border border-line bg-white p-5">
+                      <div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                        <div class="flex items-start gap-4">
+                          <span class="grid h-16 w-16 shrink-0 place-items-center rounded-lg bg-teal/12 text-xl font-semibold text-teal">林</span>
+                          <div>
+                            <div class="flex flex-wrap items-center gap-2">
+                              <h2 class="text-xl font-semibold">林晚</h2>
+                              <span class="rounded-full bg-teal/10 px-2 py-1 text-xs text-teal">主角</span>
+                              <span class="rounded-full bg-mist px-2 py-1 text-xs text-slate">需人工确认 0 项</span>
+                            </div>
+                            <p class="mt-2 text-sm leading-6 text-slate">28 岁，调查记者。冷静敏感，因父亲失踪七年后收到的一封信重新回到雾港。</p>
+                          </div>
+                        </div>
+                        <button class="grid h-10 w-10 place-items-center rounded-lg border border-line bg-white" aria-label="编辑角色">
+                          <i data-lucide="pencil" class="h-4 w-4"></i>
+                        </button>
+                      </div>
+
+                      <div class="mt-5 grid gap-4 md:grid-cols-2">
+                        <label class="block">
+                          <span class="text-sm font-medium">身份</span>
+                          <input class="mt-2 h-10 w-full rounded-lg border border-line bg-paper px-3 text-sm outline-none focus:border-teal" value="调查记者" />
+                        </label>
+                        <label class="block">
+                          <span class="text-sm font-medium">年龄</span>
+                          <input class="mt-2 h-10 w-full rounded-lg border border-line bg-paper px-3 text-sm outline-none focus:border-teal" value="28" />
+                        </label>
+                        <label class="block md:col-span-2">
+                          <span class="text-sm font-medium">性格特点</span>
+                          <textarea class="mt-2 min-h-20 w-full rounded-lg border border-line bg-paper p-3 text-sm leading-6 outline-none focus:border-teal">敏锐、克制、执着。习惯先观察再发问，对亲密关系保持距离。</textarea>
+                        </label>
+                        <label class="block">
+                          <span class="text-sm font-medium">核心欲望</span>
+                          <textarea class="mt-2 min-h-20 w-full rounded-lg border border-line bg-paper p-3 text-sm leading-6 outline-none focus:border-teal">查清父亲失踪真相，证明自己没有被家族谎言困住。</textarea>
+                        </label>
+                        <label class="block">
+                          <span class="text-sm font-medium">核心恐惧</span>
+                          <textarea class="mt-2 min-h-20 w-full rounded-lg border border-line bg-paper p-3 text-sm leading-6 outline-none focus:border-teal">真相会证明父亲主动抛弃了她。</textarea>
+                        </label>
+                        <label class="block">
+                          <span class="text-sm font-medium">语言风格</span>
+                          <textarea class="mt-2 min-h-20 w-full rounded-lg border border-line bg-paper p-3 text-sm leading-6 outline-none focus:border-teal">短句、追问明确、很少直接暴露情绪。</textarea>
+                        </label>
+                        <label class="block">
+                          <span class="text-sm font-medium">成长弧光</span>
+                          <textarea class="mt-2 min-h-20 w-full rounded-lg border border-line bg-paper p-3 text-sm leading-6 outline-none focus:border-teal">从执着于寻找父亲，到面对真相并重建自己的选择。</textarea>
+                        </label>
+                        <label class="block md:col-span-2">
+                          <span class="text-sm font-medium">关键台词</span>
+                          <textarea class="mt-2 min-h-20 w-full rounded-lg border border-line bg-paper p-3 font-script text-sm leading-7 outline-none focus:border-teal">“如果他真的想让我忘了，为什么还要留下这封信？”</textarea>
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                </article>
+
+                <aside class="border-t border-line bg-mist p-4 lg:border-l lg:border-t-0">
+                  <div class="space-y-4">
+                    <section class="rounded-lg border border-line bg-white p-4">
+                      <h2 class="text-sm font-semibold">人物关系</h2>
+                      <div class="mt-3 space-y-3">
+                        <article class="rounded-lg border border-line bg-paper p-3">
+                          <div class="flex items-center justify-between gap-2">
+                            <span class="text-sm font-medium">陈伯</span>
+                            <span class="rounded-full bg-rust/10 px-2 py-1 text-xs text-rust">隐瞒 / 保护</span>
+                          </div>
+                          <div class="mt-2 h-2 overflow-hidden rounded-full bg-white">
+                            <div class="h-full w-[64%] rounded-full bg-rust"></div>
+                          </div>
+                          <p class="mt-2 text-xs leading-5 text-slate">关系状态：谨慎合作。来源：第 1 场、第一章 12-15 段。</p>
+                        </article>
+                        <article class="rounded-lg border border-line bg-paper p-3">
+                          <div class="flex items-center justify-between gap-2">
+                            <span class="text-sm font-medium">林远山</span>
+                            <span class="rounded-full bg-violet/10 px-2 py-1 text-xs text-violet">父女</span>
+                          </div>
+                          <div class="mt-2 h-2 overflow-hidden rounded-full bg-white">
+                            <div class="h-full w-[88%] rounded-full bg-violet"></div>
+                          </div>
+                          <p class="mt-2 text-xs leading-5 text-slate">关系状态：缺席但强牵引。AI 置信度 0.92。</p>
+                        </article>
+                      </div>
+                    </section>
+
+                    <section class="rounded-lg border border-line bg-white p-4">
+                      <h2 class="text-sm font-semibold">关系更新建议</h2>
+                      <div class="mt-3 rounded-lg border border-amber/40 bg-amber/10 p-3">
+                        <p class="text-sm leading-6 text-ink/78">检测到第 3 场中林晚与周砚从“疏离”转为“暂时合作”。</p>
+                        <div class="mt-3 flex gap-2">
+                          <button class="h-8 rounded-lg bg-teal px-3 text-xs font-medium text-white">确认</button>
+                          <button class="h-8 rounded-lg border border-line bg-white px-3 text-xs font-medium">查看依据</button>
+                        </div>
+                      </div>
+                    </section>
+
+                    <section class="rounded-lg border border-line bg-white p-4">
+                      <h2 class="text-sm font-semibold">出场统计</h2>
+                      <div class="mt-3 space-y-3 text-sm">
+                        <div>
+                          <div class="flex justify-between">
+                            <span>林晚</span>
+                            <span>6 场</span>
+                          </div>
+                          <div class="mt-2 h-2 rounded-full bg-mist">
+                            <div class="h-full w-full rounded-full bg-teal"></div>
+                          </div>
+                        </div>
+                        <div>
+                          <div class="flex justify-between">
+                            <span>陈伯</span>
+                            <span>2 场</span>
+                          </div>
+                          <div class="mt-2 h-2 rounded-full bg-mist">
+                            <div class="h-full w-[34%] rounded-full bg-rust"></div>
+                          </div>
+                        </div>
+                        <div>
+                          <div class="flex justify-between">
+                            <span>周砚</span>
+                            <span>2 场</span>
+                          </div>
+                          <div class="mt-2 h-2 rounded-full bg-mist">
+                            <div class="h-full w-[34%] rounded-full bg-amber"></div>
+                          </div>
+                        </div>
+                      </div>
+                    </section>
+                  </div>
+                </aside>
+              </div>
+            </section>
+          </section>
+
+          <section id="screen-agent" class="app-screen">
+            <section class="rounded-lg border border-line bg-white shadow-pane">
+              <div class="flex flex-col gap-3 border-b border-line px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <h1 class="text-xl font-semibold">Agent 对话心流</h1>
+                  <p class="mt-1 text-sm text-slate">当前上下文：第 1 场 · 林晚、陈伯 · 原文第一章 12-15 段</p>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                  <button class="inline-flex h-10 items-center gap-2 rounded-lg border border-line bg-white px-3 text-sm font-medium">
+                    <i data-lucide="send" class="h-4 w-4"></i>
+                    发送当前场
+                  </button>
+                  <button class="inline-flex h-10 items-center gap-2 rounded-lg border border-line bg-white px-3 text-sm font-medium">
+                    <i data-lucide="quote" class="h-4 w-4"></i>
+                    发送选中文本
+                  </button>
+                </div>
+              </div>
+
+              <div class="agent-grid grid min-h-[760px] grid-cols-[300px_minmax(0,1fr)_360px]">
+                <aside class="border-b border-line bg-mist p-4 lg:border-b-0 lg:border-r">
+                  <h2 class="text-sm font-semibold">上下文</h2>
+                  <div class="mt-3 space-y-3">
+                    <section class="rounded-lg border border-line bg-white p-3">
+                      <div class="flex items-center gap-2 text-sm font-medium">
+                        <i data-lucide="file-text" class="h-4 w-4 text-teal"></i>
+                        当前场景
+                      </div>
+                      <p class="mt-2 text-xs leading-5 text-slate">内景 旧书店 - 雨夜。林晚从陈伯处得到父亲留下的信。</p>
+                    </section>
+                    <section class="rounded-lg border border-line bg-white p-3">
+                      <div class="flex items-center gap-2 text-sm font-medium">
+                        <i data-lucide="users" class="h-4 w-4 text-violet"></i>
+                        角色档案
+                      </div>
+                      <p class="mt-2 text-xs leading-5 text-slate">林晚：克制、追问明确。陈伯：谨慎、内疚、守信。</p>
+                    </section>
+                    <section class="rounded-lg border border-line bg-white p-3">
+                      <div class="flex items-center gap-2 text-sm font-medium">
+                        <i data-lucide="book-marked" class="h-4 w-4 text-rust"></i>
+                        原文片段
+                      </div>
+                      <p class="mt-2 font-script text-xs leading-6 text-slate">“你父亲留下了一封信。”老人说。</p>
+                    </section>
+                    <section class="rounded-lg border border-line bg-white p-3">
+                      <div class="flex items-center gap-2 text-sm font-medium">
+                        <i data-lucide="target" class="h-4 w-4 text-amber"></i>
+                        本轮目标
+                      </div>
+                      <p class="mt-2 text-xs leading-5 text-slate">增强陈伯交信前的犹豫，减少解释性旁白。</p>
+                    </section>
+                  </div>
+                </aside>
+
+                <article class="flex min-h-[760px] flex-col bg-paper">
+                  <div class="scrollbar-thin flex-1 space-y-4 overflow-auto p-5">
+                    <div class="max-w-[82%] rounded-lg border border-line bg-white p-4">
+                      <div class="mb-2 flex items-center gap-2 text-sm font-semibold">
+                        <span class="grid h-7 w-7 place-items-center rounded-lg bg-ink text-white">
+                          <i data-lucide="bot" class="h-4 w-4"></i>
+                        </span>
+                        Fabula Agent
+                      </div>
+                      <p class="text-sm leading-7 text-slate">第 1 场的悬疑钩子成立，但冲突可以更明确。陈伯目前直接给出信件，降低了他作为知情者的阻力。</p>
+                    </div>
+
+                    <div class="ml-auto max-w-[82%] rounded-lg bg-teal p-4 text-white">
+                      <div class="mb-2 flex items-center gap-2 text-sm font-semibold">
+                        <span class="grid h-7 w-7 place-items-center rounded-lg bg-white/16">水</span>
+                        作者
+                      </div>
+                      <p class="text-sm leading-7">把陈伯写得更犹豫一点，但不要让他显得故弄玄虚。</p>
+                    </div>
+
+                    <div class="max-w-[86%] rounded-lg border border-line bg-white p-4">
+                      <div class="mb-2 flex items-center gap-2 text-sm font-semibold">
+                        <span class="grid h-7 w-7 place-items-center rounded-lg bg-ink text-white">
+                          <i data-lucide="bot" class="h-4 w-4"></i>
+                        </span>
+                        Fabula Agent
+                      </div>
+                      <p class="text-sm leading-7 text-slate">可采用“动作先于解释”的处理。陈伯先把信按回抽屉，确认林晚愿意承受真相，再交出信。</p>
+                      <div class="mt-3 rounded-lg border border-line bg-paper p-3 font-script text-sm leading-7 text-ink">
+                        陈伯把信封推到柜台边，又停住。<br />
+                        “有些事，你一旦拆开，就不能再当没发生过。”<br />
+                        林晚没有退。她把湿透的伞靠在门边。<br />
+                        “那就别替我决定。”
+                      </div>
+                      <div class="mt-3 flex flex-wrap gap-2">
+                        <button class="h-8 rounded-lg bg-teal px-3 text-xs font-medium text-white">应用到剧本</button>
+                        <button class="h-8 rounded-lg border border-line bg-white px-3 text-xs font-medium">生成另一版</button>
+                        <button class="h-8 rounded-lg border border-line bg-white px-3 text-xs font-medium">查看原文依据</button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="border-t border-line bg-white p-4">
+                    <div class="mb-3 flex flex-wrap gap-2">
+                      <button class="pill active h-8 rounded-lg border border-line bg-paper px-3 text-xs font-medium">替换选中文本</button>
+                      <button class="pill h-8 rounded-lg border border-line bg-paper px-3 text-xs font-medium">插入光标处</button>
+                      <button class="pill h-8 rounded-lg border border-line bg-paper px-3 text-xs font-medium">生成建议</button>
+                    </div>
+                    <div class="flex gap-2">
+                      <textarea class="min-h-12 flex-1 resize-none rounded-lg border border-line bg-paper px-3 py-2 text-sm leading-6 outline-none focus:border-teal">再短一点，更像林晚的语气。</textarea>
+                      <button class="grid h-12 w-12 shrink-0 place-items-center rounded-lg bg-ink text-white" aria-label="发送">
+                        <i data-lucide="arrow-up" class="h-5 w-5"></i>
+                      </button>
+                    </div>
+                  </div>
+                </article>
+
+                <aside class="border-t border-line bg-mist p-4 lg:border-l lg:border-t-0">
+                  <div class="space-y-4">
+                    <section class="rounded-lg border border-line bg-white p-4">
+                      <h2 class="text-sm font-semibold">可执行任务</h2>
+                      <div class="mt-3 grid grid-cols-2 gap-2">
+                        <button class="h-9 rounded-lg border border-line bg-paper text-xs font-medium">重写本场</button>
+                        <button class="h-9 rounded-lg border border-line bg-paper text-xs font-medium">扩写对白</button>
+                        <button class="h-9 rounded-lg border border-line bg-paper text-xs font-medium">减少旁白</button>
+                        <button class="h-9 rounded-lg border border-line bg-paper text-xs font-medium">检查连贯</button>
+                        <button class="h-9 rounded-lg border border-line bg-paper text-xs font-medium">调整语气</button>
+                        <button class="h-9 rounded-lg border border-line bg-paper text-xs font-medium">批量修改</button>
+                      </div>
+                    </section>
+
+                    <section class="rounded-lg border border-line bg-white p-4">
+                      <h2 class="text-sm font-semibold">修改摘要</h2>
+                      <ul class="mt-3 space-y-2 text-sm text-slate">
+                        <li class="flex gap-2"><i data-lucide="plus" class="mt-0.5 h-4 w-4 text-teal"></i>新增 4 句对白</li>
+                        <li class="flex gap-2"><i data-lucide="minus" class="mt-0.5 h-4 w-4 text-rust"></i>删除 1 句旁白</li>
+                        <li class="flex gap-2"><i data-lucide="refresh-cw" class="mt-0.5 h-4 w-4 text-violet"></i>陈伯语气更含蓄</li>
+                      </ul>
+                    </section>
+
+                    <section class="rounded-lg border border-line bg-white p-4">
+                      <h2 class="text-sm font-semibold">可能影响</h2>
+                      <p class="mt-3 text-sm leading-6 text-slate">陈伯与林晚的关系强度从 0.64 提升到 0.69。可生成关系更新建议，等待用户确认后写入角色表。</p>
+                      <button class="mt-3 h-9 w-full rounded-lg bg-teal text-xs font-medium text-white">同步更新角色设定</button>
+                    </section>
+                  </div>
+                </aside>
+              </div>
+            </section>
+          </section>
+
+          <section id="screen-admin" class="app-screen">
+            <div class="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+              <section class="rounded-lg border border-line bg-white shadow-pane">
+                <div class="border-b border-line px-5 py-4">
+                  <h1 class="text-xl font-semibold">后台管理</h1>
+                  <p class="mt-1 text-sm text-slate">运营配置、AI 任务监控、点数和套餐管理</p>
+                </div>
+
+                <div class="grid divide-y divide-line">
+                  <article class="grid gap-4 px-5 py-4 md:grid-cols-[220px_minmax(0,1fr)_120px] md:items-center">
+                    <div class="flex items-center gap-3">
+                      <span class="grid h-10 w-10 place-items-center rounded-lg bg-teal/12 text-teal">
+                        <i data-lucide="users" class="h-4 w-4"></i>
+                      </span>
+                      <div>
+                        <h2 class="font-semibold">用户管理</h2>
+                        <p class="text-xs text-slate">注册、邮箱、会员状态</p>
+                      </div>
+                    </div>
+                    <p class="text-sm text-slate">今日新增 38 位用户，专业版转化率 8.6%。</p>
+                    <button class="h-9 rounded-lg border border-line bg-white text-sm font-medium">查看</button>
+                  </article>
+                  <article class="grid gap-4 px-5 py-4 md:grid-cols-[220px_minmax(0,1fr)_120px] md:items-center">
+                    <div class="flex items-center gap-3">
+                      <span class="grid h-10 w-10 place-items-center rounded-lg bg-rust/12 text-rust">
+                        <i data-lucide="activity" class="h-4 w-4"></i>
+                      </span>
+                      <div>
+                        <h2 class="font-semibold">AI 任务监控</h2>
+                        <p class="text-xs text-slate">队列、失败任务、重试</p>
+                      </div>
+                    </div>
+                    <p class="text-sm text-slate">当前队列 12 个任务，1 个任务需要人工确认敏感内容。</p>
+                    <button class="h-9 rounded-lg border border-line bg-white text-sm font-medium">处理</button>
+                  </article>
+                  <article class="grid gap-4 px-5 py-4 md:grid-cols-[220px_minmax(0,1fr)_120px] md:items-center">
+                    <div class="flex items-center gap-3">
+                      <span class="grid h-10 w-10 place-items-center rounded-lg bg-violet/12 text-violet">
+                        <i data-lucide="credit-card" class="h-4 w-4"></i>
+                      </span>
+                      <div>
+                        <h2 class="font-semibold">套餐与订单</h2>
+                        <p class="text-xs text-slate">免费版、专业版、点数包</p>
+                      </div>
+                    </div>
+                    <p class="text-sm text-slate">本月点数包订单 126 笔，DOCX/PDF 导出消耗占比 11%。</p>
+                    <button class="h-9 rounded-lg border border-line bg-white text-sm font-medium">配置</button>
+                  </article>
+                  <article class="grid gap-4 px-5 py-4 md:grid-cols-[220px_minmax(0,1fr)_120px] md:items-center">
+                    <div class="flex items-center gap-3">
+                      <span class="grid h-10 w-10 place-items-center rounded-lg bg-amber/14 text-ink">
+                        <i data-lucide="megaphone" class="h-4 w-4"></i>
+                      </span>
+                      <div>
+                        <h2 class="font-semibold">系统公告</h2>
+                        <p class="text-xs text-slate">活动、版本、维护通知</p>
+                      </div>
+                    </div>
+                    <p class="text-sm text-slate">下一条公告计划在 2026-06-08 09:00 发布。</p>
+                    <button class="h-9 rounded-lg border border-line bg-white text-sm font-medium">编辑</button>
+                  </article>
+                </div>
+              </section>
+
+              <aside class="space-y-5">
+                <section class="rounded-lg border border-line bg-white p-5 shadow-pane">
+                  <h2 class="font-semibold">模型调用日志</h2>
+                  <div class="mt-4 space-y-3 text-sm">
+                    <div class="flex items-center justify-between">
+                      <span class="text-slate">成功率</span>
+                      <span class="font-semibold text-teal">98.4%</span>
+                    </div>
+                    <div class="flex items-center justify-between">
+                      <span class="text-slate">平均耗时</span>
+                      <span class="font-semibold">42s</span>
+                    </div>
+                    <div class="flex items-center justify-between">
+                      <span class="text-slate">重试次数</span>
+                      <span class="font-semibold text-rust">7</span>
+                    </div>
+                  </div>
+                </section>
+
+                <section class="rounded-lg border border-line bg-white p-5 shadow-pane">
+                  <h2 class="font-semibold">反馈管理</h2>
+                  <div class="mt-4 space-y-3 text-sm">
+                    <div class="rounded-lg border border-line bg-mist p-3">
+                      <div class="font-medium">导出 DOCX 格式错位</div>
+                      <div class="mt-1 text-xs text-slate">P1 · 3 位用户反馈</div>
+                    </div>
+                    <div class="rounded-lg border border-line bg-mist p-3">
+                      <div class="font-medium">希望支持短剧平台模板</div>
+                      <div class="mt-1 text-xs text-slate">P2 · 功能建议</div>
+                    </div>
+                  </div>
+                </section>
+              </aside>
             </div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <div id="export-drawer" class="drawer fixed inset-y-0 right-0 z-50 w-full max-w-[420px] border-l border-line bg-white shadow-pane">
+      <div class="flex h-full flex-col">
+        <div class="flex items-center justify-between border-b border-line px-5 py-4">
+          <div>
+            <h2 class="font-semibold">导出</h2>
+            <p class="mt-1 text-sm text-slate">内容、格式与导出设置</p>
           </div>
-        </section>
-      </main>
+          <button class="grid h-9 w-9 place-items-center rounded-lg border border-line" data-close-export aria-label="关闭导出">
+            <i data-lucide="x" class="h-4 w-4"></i>
+          </button>
+        </div>
+
+        <div class="scrollbar-thin flex-1 space-y-5 overflow-auto p-5">
+          <section>
+            <h3 class="text-sm font-semibold">导出内容</h3>
+            <div class="mt-3 space-y-2">
+              <label class="flex h-10 items-center justify-between rounded-lg border border-line bg-mist px-3 text-sm">
+                <span>完整剧本</span>
+                <input type="checkbox" checked class="h-4 w-4 accent-teal" />
+              </label>
+              <label class="flex h-10 items-center justify-between rounded-lg border border-line bg-mist px-3 text-sm">
+                <span>角色表</span>
+                <input type="checkbox" checked class="h-4 w-4 accent-teal" />
+              </label>
+              <label class="flex h-10 items-center justify-between rounded-lg border border-line bg-mist px-3 text-sm">
+                <span>人物关系表</span>
+                <input type="checkbox" checked class="h-4 w-4 accent-teal" />
+              </label>
+              <label class="flex h-10 items-center justify-between rounded-lg border border-line bg-mist px-3 text-sm">
+                <span>原文对照表</span>
+                <input type="checkbox" class="h-4 w-4 accent-teal" />
+              </label>
+              <label class="flex h-10 items-center justify-between rounded-lg border border-line bg-mist px-3 text-sm">
+                <span>AI 修改记录</span>
+                <input type="checkbox" class="h-4 w-4 accent-teal" />
+              </label>
+            </div>
+          </section>
+
+          <section>
+            <h3 class="text-sm font-semibold">格式</h3>
+            <div class="mt-3 grid grid-cols-2 gap-2">
+              <button class="export-format active h-10 rounded-lg border border-line bg-white text-sm font-medium">YAML</button>
+              <button class="export-format h-10 rounded-lg border border-line bg-white text-sm font-medium">TXT</button>
+              <button class="export-format h-10 rounded-lg border border-line bg-white text-sm font-medium">DOCX</button>
+              <button class="export-format h-10 rounded-lg border border-line bg-white text-sm font-medium">PDF</button>
+              <button class="export-format h-10 rounded-lg border border-line bg-white text-sm font-medium">JSON</button>
+            </div>
+          </section>
+
+          <section>
+            <h3 class="text-sm font-semibold">导出设置</h3>
+            <div class="mt-3 space-y-3">
+              <label class="flex items-center justify-between gap-3 text-sm">
+                <span>包含场景编号</span>
+                <input type="checkbox" checked class="h-4 w-4 accent-teal" />
+              </label>
+              <label class="flex items-center justify-between gap-3 text-sm">
+                <span>标准剧本格式</span>
+                <input type="checkbox" checked class="h-4 w-4 accent-teal" />
+              </label>
+              <label class="flex items-center justify-between gap-3 text-sm">
+                <span>简洁阅读格式</span>
+                <input type="checkbox" class="h-4 w-4 accent-teal" />
+              </label>
+            </div>
+          </section>
+
+          <section class="rounded-lg border border-line bg-mist p-4">
+            <div class="flex items-center justify-between">
+              <span class="text-sm text-slate">预计消耗</span>
+              <span class="font-semibold text-teal">70 点</span>
+            </div>
+            <div class="mt-2 text-xs leading-5 text-slate">免费版可导出 TXT 和基础 YAML。专业版可导出 DOCX、PDF 和完整角色档案。</div>
+          </section>
+        </div>
+
+        <div class="border-t border-line p-5">
+          <button class="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-ink text-sm font-medium text-paper">
+            <i data-lucide="download" class="h-4 w-4"></i>
+            确认导出
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div id="version-modal" class="modal fixed inset-0 z-50 grid place-items-center bg-ink/45 p-4">
+      <div class="modal-card w-full max-w-2xl rounded-lg border border-line bg-white shadow-pane">
+        <div class="flex items-center justify-between border-b border-line px-5 py-4">
+          <div>
+            <h2 class="font-semibold">版本管理</h2>
+            <p class="mt-1 text-sm text-slate">自动保存、手动版本、AI 修改记录和差异比较</p>
+          </div>
+          <button class="grid h-9 w-9 place-items-center rounded-lg border border-line" data-close-version aria-label="关闭版本管理">
+            <i data-lucide="x" class="h-4 w-4"></i>
+          </button>
+        </div>
+        <div class="grid divide-y divide-line">
+          <article class="flex flex-col gap-3 px-5 py-4 md:flex-row md:items-center md:justify-between">
+            <div>
+              <div class="flex items-center gap-2">
+                <span class="font-medium">v1.4</span>
+                <span class="rounded-full bg-teal/10 px-2 py-1 text-xs text-teal">当前版本</span>
+              </div>
+              <p class="mt-1 text-sm text-slate">采纳 AI 对第 1 场冲突增强建议 · 14:32</p>
+            </div>
+            <button class="h-9 rounded-lg border border-line bg-white px-3 text-sm font-medium">比较</button>
+          </article>
+          <article class="flex flex-col gap-3 px-5 py-4 md:flex-row md:items-center md:justify-between">
+            <div>
+              <div class="font-medium">v1.3</div>
+              <p class="mt-1 text-sm text-slate">手动保存：完成第 1-3 场粗修 · 13:58</p>
+            </div>
+            <button class="h-9 rounded-lg border border-line bg-white px-3 text-sm font-medium">恢复</button>
+          </article>
+          <article class="flex flex-col gap-3 px-5 py-4 md:flex-row md:items-center md:justify-between">
+            <div>
+              <div class="font-medium">v1.2</div>
+              <p class="mt-1 text-sm text-slate">AI 生成初稿入库 · 13:12</p>
+            </div>
+            <button class="h-9 rounded-lg border border-line bg-white px-3 text-sm font-medium">恢复</button>
+          </article>
+        </div>
+        <div class="flex justify-end gap-2 border-t border-line px-5 py-4">
+          <button class="h-10 rounded-lg border border-line bg-white px-3 text-sm font-medium" data-close-version>取消</button>
+          <button class="h-10 rounded-lg bg-teal px-4 text-sm font-medium text-white">保存新版本</button>
+        </div>
+      </div>
     </div>
 
     <script>
-      const screenIds = ["import", "progress", "workspace"];
+      const titles = {
+        dashboard: ["项目总览", "雾港来信 · 待修改 · 最近保存 2 分钟前"],
+        create: ["创建项目", "填写项目信息、上传章节并设置改编参数"],
+        progress: ["改编进度", "北境药师 · 改编中 · 异步任务 #FS-2408"],
+        workspace: ["剧本工作台", "雾港来信 · 第 1 场 · 旧书店收到来信"],
+        roles: ["角色工作台", "林晚 · 角色档案 · 关系更新建议 1 条"],
+        agent: ["Agent 对话心流", "当前上下文：第 1 场 · 林晚、陈伯"],
+        admin: ["后台管理", "运营配置、AI 任务监控、点数和套餐管理"],
+      };
+
       const progressStates = [
-        { pct: 36, text: "正在阅读章节，识别角色、地点和关键事件。" },
-        { pct: 52, text: "正在整理人物关系，记录已经公开的信息。" },
-        { pct: 68, text: "正在规划场景，把章节拆成适合表演的连续片段。" },
-        { pct: 84, text: "正在生成剧本初稿，转换动作、对白和转场。" },
-        { pct: 100, text: "剧本初稿已生成，正在等待查看。" },
+        { pct: 61, text: "正在生成人物关系表，并为每条关系绑定来源章节。" },
+        { pct: 72, text: "正在将章节拆分为剧本场景，建立场景与原文映射。" },
+        { pct: 84, text: "正在生成结构化剧本内容，转换动作、对白和转场。" },
+        { pct: 93, text: "正在检查人物一致性、剧情连续性和格式规范。" },
+        { pct: 100, text: "剧本初稿已生成，项目状态已更新为待修改。" },
       ];
-      let progressIndex = 2;
+      let progressIndex = 0;
 
       function setScreen(name) {
-        screenIds.forEach((id) => {
-          document.getElementById(`screen-${id}`).classList.toggle("active", id === name);
+        document.querySelectorAll(".app-screen").forEach((screen) => {
+          screen.classList.toggle("active", screen.id === `screen-${name}`);
         });
-
-        document.querySelectorAll("[data-nav]").forEach((button) => {
-          button.classList.toggle("active", button.dataset.nav === name);
+        document.querySelectorAll(".nav-item").forEach((item) => {
+          item.classList.toggle("active", item.dataset.screen === name);
         });
-
+        document.getElementById("page-title").textContent = titles[name][0];
+        document.getElementById("page-subtitle").textContent = titles[name][1];
         window.scrollTo({ top: 0, behavior: "smooth" });
       }
 
       function setWorkspacePanel(name) {
         document.querySelectorAll(".workspace-panel").forEach((panel) => {
-          panel.classList.toggle("hidden", panel.id !== `workspace-${name}`);
-          panel.classList.toggle("grid", panel.id === "workspace-script" && name === "script");
+          panel.classList.toggle("active", panel.id === `workspace-${name}`);
         });
-
-        document.querySelectorAll(".workspace-tab").forEach((tab) => {
-          tab.classList.toggle("active", tab.dataset.workspaceTab === name);
+        document.querySelectorAll("[data-workspace-panel]").forEach((button) => {
+          button.classList.toggle("active", button.dataset.workspacePanel === name);
         });
       }
 
-      function updateProgress() {
+      function openDrawer() {
+        document.getElementById("export-drawer").classList.add("open");
+      }
+
+      function closeDrawer() {
+        document.getElementById("export-drawer").classList.remove("open");
+      }
+
+      function openVersion() {
+        document.getElementById("version-modal").classList.add("open");
+      }
+
+      function closeVersion() {
+        document.getElementById("version-modal").classList.remove("open");
+      }
+
+      function tickProgress() {
+        if (!document.getElementById("screen-progress").classList.contains("active")) return;
         progressIndex = Math.min(progressIndex + 1, progressStates.length - 1);
         const state = progressStates[progressIndex];
         document.getElementById("progress-percent").textContent = `${state.pct}%`;
-        document.getElementById("progress-bar").style.width = `${state.pct}%`;
-        document.getElementById("progress-copy").textContent = state.text;
+        document.getElementById("progress-fill").style.width = `${state.pct}%`;
+        document.getElementById("progress-text").textContent = state.text;
       }
 
-      document.querySelectorAll("[data-nav]").forEach((button) => {
-        button.addEventListener("click", () => setScreen(button.dataset.nav));
+      document.querySelectorAll(".nav-item").forEach((button) => {
+        button.addEventListener("click", () => setScreen(button.dataset.screen));
       });
 
-      document.querySelectorAll("[data-action='start-progress']").forEach((button) => {
-        button.addEventListener("click", () => {
-          setScreen("progress");
-          window.setTimeout(updateProgress, 700);
-        });
+      document.querySelectorAll("[data-screen-link]").forEach((button) => {
+        button.addEventListener("click", () => setScreen(button.dataset.screenLink));
       });
 
-      document.querySelectorAll(".chapter-tab").forEach((tab) => {
-        tab.addEventListener("click", () => {
-          document.querySelectorAll(".chapter-tab").forEach((item) => item.classList.remove("active"));
-          tab.classList.add("active");
-          const titleMap = {
-            1: "第一章 雾港",
-            2: "第二章 来信",
-            3: "第三章 码头",
-          };
-          document.getElementById("chapter-title").value = titleMap[tab.dataset.chapter];
-        });
-      });
-
-      document.querySelectorAll(".setting-pill, .format-tab").forEach((button) => {
-        button.addEventListener("click", () => {
-          const siblings = button.parentElement.querySelectorAll(".setting-pill, .format-tab");
-          siblings.forEach((item) => item.classList.remove("active"));
-          button.classList.add("active");
-        });
-      });
-
-      document.querySelectorAll("[data-workspace-tab]").forEach((tab) => {
-        tab.addEventListener("click", () => setWorkspacePanel(tab.dataset.workspaceTab));
+      document.querySelectorAll("[data-workspace-panel]").forEach((button) => {
+        button.addEventListener("click", () => setWorkspacePanel(button.dataset.workspacePanel));
       });
 
       document.querySelectorAll(".scene-card").forEach((card) => {
@@ -979,12 +1855,42 @@ scenes:
         });
       });
 
-      window.setInterval(() => {
-        if (document.getElementById("screen-progress").classList.contains("active")) {
-          updateProgress();
-        }
-      }, 4200);
+      document.querySelectorAll(".role-card").forEach((card) => {
+        card.addEventListener("click", () => {
+          document.querySelectorAll(".role-card").forEach((item) => item.classList.remove("active"));
+          card.classList.add("active");
+        });
+      });
 
+      document.querySelectorAll(".pill, .export-format").forEach((button) => {
+        button.addEventListener("click", () => {
+          const siblings = button.parentElement.querySelectorAll(".pill, .export-format");
+          siblings.forEach((item) => item.classList.remove("active"));
+          button.classList.add("active");
+        });
+      });
+
+      document.querySelectorAll("[data-open-export]").forEach((button) => button.addEventListener("click", openDrawer));
+      document.querySelectorAll("[data-close-export]").forEach((button) => button.addEventListener("click", closeDrawer));
+      document.querySelectorAll("[data-open-version]").forEach((button) => button.addEventListener("click", openVersion));
+      document.querySelectorAll("[data-close-version]").forEach((button) => button.addEventListener("click", closeVersion));
+
+      document.querySelectorAll(".suggestion-apply").forEach((button) => {
+        button.addEventListener("click", () => {
+          button.textContent = "已采纳";
+          button.classList.remove("bg-teal");
+          button.classList.add("bg-ink");
+        });
+      });
+
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+          closeDrawer();
+          closeVersion();
+        }
+      });
+
+      window.setInterval(tickProgress, 4200);
       lucide.createIcons();
     </script>
   </body>
