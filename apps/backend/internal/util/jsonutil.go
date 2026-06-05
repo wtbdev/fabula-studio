@@ -3,8 +3,61 @@ package util
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 )
+
+// PrepareJSON strips markdown wrappers, extracts the JSON payload, repairs common
+// truncation, and rejects empty/non-JSON model outputs before callers unmarshal.
+func PrepareJSON(raw, label string) (string, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "", fmt.Errorf("%s: empty model response", label)
+	}
+
+	extracted := ExtractJSON(trimmed)
+	if extracted == "" {
+		return "", fmt.Errorf("%s: no JSON payload found in model response", label)
+	}
+	if !strings.ContainsAny(extracted, "{[") {
+		return "", fmt.Errorf("%s: no JSON payload found in model response: %s", label, preview(trimmed))
+	}
+
+	repaired := RepairJSON(extracted)
+	if strings.TrimSpace(repaired) == "" {
+		return "", fmt.Errorf("%s: JSON payload is empty after repair", label)
+	}
+	return repaired, nil
+}
+
+// ExtractJSON strips markdown code blocks and surrounding text, returning just the JSON.
+func ExtractJSON(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return raw
+	}
+
+	// Strip markdown code blocks: ```json ... ``` or ``` ... ```
+	if start := strings.Index(raw, "```"); start != -1 {
+		inner := raw[start+3:]
+		// Skip language tag (json, JSON, etc.)
+		if idx := strings.Index(inner, "\n"); idx != -1 {
+			inner = inner[idx+1:]
+		}
+		if end := strings.LastIndex(inner, "```"); end != -1 {
+			raw = strings.TrimSpace(inner[:end])
+		}
+	}
+
+	// Find first { or [ and last } or ]
+	firstObj := strings.IndexAny(raw, "{[")
+	lastObj := strings.LastIndexAny(raw, "}]")
+	if firstObj != -1 && lastObj > firstObj {
+		raw = raw[firstObj : lastObj+1]
+	}
+
+	return raw
+}
 
 // RepairJSON attempts to fix truncated JSON by closing open brackets/braces.
 func RepairJSON(raw string) string {
@@ -95,4 +148,12 @@ func RepairJSON(raw string) string {
 
 	// If still invalid, return original (will fail parsing as before)
 	return raw
+}
+
+func preview(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) <= 240 {
+		return s
+	}
+	return s[:240] + "..."
 }

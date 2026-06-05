@@ -40,5 +40,10 @@ func Run(ctx context.Context, agt *llmagent.LLMAgent, prompt string) (string, er
 			}
 		}
 	}
-	return sb.String(), nil
+	result := strings.TrimSpace(sb.String())
+	if result == "" {
+		return "", fmt.Errorf("agent returned empty response")
+	}
+	return result, nil
+
 }

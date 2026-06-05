@@ -10,6 +10,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+	"gopkg.in/yaml.v3"
 
 	"github.com/fabula-studio/backend/internal/agent"
 	"github.com/fabula-studio/backend/internal/graph"
@@ -19,6 +20,26 @@ import (
 	"github.com/fabula-studio/backend/internal/tree"
 	"github.com/fabula-studio/backend/internal/validator"
 )
+
+// PipelineStatus holds the current state of the pipeline.
+type PipelineStatus struct {
+	State       string    `json:"state"`        // idle, running, completed, failed
+	CurrentStep string    `json:"current_step"`
+	Progress    int       `json:"progress"`      // 0-100
+	Error       string    `json:"error,omitempty"`
+	StartedAt   time.Time `json:"started_at"`
+}
+
+// PipelineResult holds the complete output of a pipeline run.
+type PipelineResult struct {
+	Tree       *tree.StoryTree    `json:"tree"`
+	GraphMgr   *graph.Manager     `json:"-"`
+	Plans      []*scene.ScenePlan `json:"plans"`
+	Screenplay *schema.Screenplay `json:"screenplay"`
+	YAMLStr    string             `json:"yaml"`
+	Duration   time.Duration      `json:"duration"`
+	CompletedAt time.Time         `json:"completed_at"`
+}
 
 
 // Pipeline orchestrates the full novel-to-screenplay conversion.
@@ -32,6 +53,10 @@ type Pipeline struct {
 	validator      *validator.Validator
 	eventBus       *observability.EventBus
 	tracer         trace.Tracer
+
+	mu         sync.RWMutex
+	status     PipelineStatus
+	lastResult *PipelineResult
 }
 
 // New creates a Pipeline with the given config and agent configuration.
@@ -57,10 +82,52 @@ func (p *Pipeline) publishEvent(event observability.PipelineEvent) {
 	}
 }
 
+// Status returns the current pipeline status (thread-safe).
+func (p *Pipeline) Status() PipelineStatus {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.status
+}
+
+// Result returns the last completed pipeline result (thread-safe).
+func (p *Pipeline) Result() *PipelineResult {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.lastResult
+}
+
+// GraphSnapshots returns the before/after graph snapshots from the last run.
+func (p *Pipeline) GraphSnapshots() (before, after map[string]*graph.GraphSnapshot) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if p.lastResult == nil || p.lastResult.GraphMgr == nil {
+		return nil, nil
+	}
+	return p.lastResult.GraphMgr.SnapshotsBefore(), p.lastResult.GraphMgr.SnapshotsAfter()
+}
+
 // Convert executes the full conversion pipeline.
 func (p *Pipeline) Convert(ctx context.Context, title, author string, chapters []string) (*schema.Screenplay, error) {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		title = "未命名小说"
+	}
+	author = strings.TrimSpace(author)
+	if author == "" {
+		author = "未知作者"
+	}
+
 	startTime := time.Now()
-	
+
+	p.mu.Lock()
+	p.status = PipelineStatus{State: "running", StartedAt: startTime}
+	p.lastResult = nil
+	p.mu.Unlock()
+
+	if p.eventBus != nil {
+		p.eventBus.Clear()
+	}
+
 	// Start tracing span
 	ctx, span := p.tracer.Start(ctx, "pipeline.convert")
 	defer span.End()
@@ -70,11 +137,16 @@ func (p *Pipeline) Convert(ctx context.Context, title, author string, chapters [
 		Step:    "pipeline",
 		Message: fmt.Sprintf("开始转换: %s (共 %d 章)", title, len(chapters)),
 		Details: map[string]interface{}{
-			"title":      title,
-			"author":     author,
-			"chapters":   len(chapters),
+			"title":    title,
+			"author":   author,
+			"chapters": len(chapters),
 		},
 	})
+
+	p.mu.Lock()
+	p.status.CurrentStep = "build_tree"
+	p.status.Progress = 5
+	p.mu.Unlock()
 
 	// Step 1-3: Build story tree with hard cuts and horizontal chains
 	stepStart := time.Now()
@@ -86,16 +158,21 @@ func (p *Pipeline) Convert(ctx context.Context, title, author string, chapters [
 	})
 	st := p.buildTree(chapters)
 	treeSpan.End()
+
+	// Emit the complete initial tree so the frontend can render it immediately
 	p.publishEvent(observability.PipelineEvent{
-		Type:     observability.EventNodeAnalyzed,
-		Step:     "build_tree",
-		Message:  fmt.Sprintf("故事树构建完成: %d 节点, %d 叶子", len(st.Nodes), len(st.LeafNodeIDs)),
-		Duration: durationPtr(time.Since(stepStart)),
+		Type:    observability.EventTreeSnapshot,
+		Step:    "build_tree",
+		Message: fmt.Sprintf("故事树构建完成: %d 节点, %d 叶子", len(st.Nodes), len(st.LeafNodeIDs)),
 		Details: map[string]interface{}{
-			"total_nodes": len(st.Nodes),
-			"leaf_nodes":  len(st.LeafNodeIDs),
+			"tree": st,
 		},
 	})
+
+	p.mu.Lock()
+	p.status.CurrentStep = "analyze_nodes"
+	p.status.Progress = 15
+	p.mu.Unlock()
 
 	// Step 4-6: Analyze nodes recursively
 	stepStart = time.Now()
@@ -108,6 +185,10 @@ func (p *Pipeline) Convert(ctx context.Context, title, author string, chapters [
 	if err := p.analyzeNodes(ctx, st, 0); err != nil {
 		analyzeSpan.RecordError(err)
 		analyzeSpan.End()
+		p.mu.Lock()
+		p.status.State = "failed"
+		p.status.Error = err.Error()
+		p.mu.Unlock()
 		p.publishEvent(observability.PipelineEvent{
 			Type:  observability.EventError,
 			Step:  "analyze_nodes",
@@ -122,7 +203,16 @@ func (p *Pipeline) Convert(ctx context.Context, title, author string, chapters [
 		Step:     "analyze_nodes",
 		Message:  fmt.Sprintf("节点分析完成: %d 叶子节点", len(st.LeafNodeIDs)),
 		Duration: durationPtr(time.Since(stepStart)),
+		Details: map[string]interface{}{
+			"total_nodes": len(st.Nodes),
+			"leaf_nodes":  len(st.LeafNodeIDs),
+		},
 	})
+
+	p.mu.Lock()
+	p.status.CurrentStep = "update_graph"
+	p.status.Progress = 40
+	p.mu.Unlock()
 
 	// Step 7: Update dynamic graph
 	stepStart = time.Now()
@@ -136,6 +226,10 @@ func (p *Pipeline) Convert(ctx context.Context, title, author string, chapters [
 	if err != nil {
 		graphSpan.RecordError(err)
 		graphSpan.End()
+		p.mu.Lock()
+		p.status.State = "failed"
+		p.status.Error = err.Error()
+		p.mu.Unlock()
 		p.publishEvent(observability.PipelineEvent{
 			Type:  observability.EventError,
 			Step:  "update_graph",
@@ -144,12 +238,24 @@ func (p *Pipeline) Convert(ctx context.Context, title, author string, chapters [
 		return nil, fmt.Errorf("graph update failed: %w", err)
 	}
 	graphSpan.End()
+	graphChars := 0
+	if afterSnap := graphMgr.SnapshotsAfter()[st.LeafNodeIDs[len(st.LeafNodeIDs)-1]]; afterSnap != nil {
+		graphChars = len(afterSnap.Characters)
+	}
 	p.publishEvent(observability.PipelineEvent{
 		Type:     observability.EventGraphUpdated,
 		Step:     "update_graph",
 		Message:  "动态图更新完成",
 		Duration: durationPtr(time.Since(stepStart)),
+		Details: map[string]interface{}{
+			"characters_count": graphChars,
+		},
 	})
+
+	p.mu.Lock()
+	p.status.CurrentStep = "plan_scenes"
+	p.status.Progress = 55
+	p.mu.Unlock()
 
 	// Step 8: Plan scenes
 	stepStart = time.Now()
@@ -169,6 +275,10 @@ func (p *Pipeline) Convert(ctx context.Context, title, author string, chapters [
 	if err != nil {
 		planSpan.RecordError(err)
 		planSpan.End()
+		p.mu.Lock()
+		p.status.State = "failed"
+		p.status.Error = err.Error()
+		p.mu.Unlock()
 		p.publishEvent(observability.PipelineEvent{
 			Type:  observability.EventError,
 			Step:  "plan_scenes",
@@ -177,6 +287,16 @@ func (p *Pipeline) Convert(ctx context.Context, title, author string, chapters [
 		return nil, fmt.Errorf("scene planning failed: %w", err)
 	}
 	planSpan.End()
+	planSummaries := make([]map[string]interface{}, len(plans))
+	for i, plan := range plans {
+		planSummaries[i] = map[string]interface{}{
+			"id":             plan.ID,
+			"source_node_ids": plan.SourceNodeIDs,
+			"scene_count":    plan.SceneCount,
+			"purpose":        plan.Purpose,
+			"location":       plan.Location,
+		}
+	}
 	p.publishEvent(observability.PipelineEvent{
 		Type:     observability.EventScenePlanned,
 		Step:     "plan_scenes",
@@ -184,8 +304,14 @@ func (p *Pipeline) Convert(ctx context.Context, title, author string, chapters [
 		Duration: durationPtr(time.Since(stepStart)),
 		Details: map[string]interface{}{
 			"plans_count": len(plans),
+			"plans":       planSummaries,
 		},
 	})
+
+	p.mu.Lock()
+	p.status.CurrentStep = "generate_scenes"
+	p.status.Progress = 65
+	p.mu.Unlock()
 
 	// Step 9-10: Generate scenes
 	stepStart = time.Now()
@@ -199,6 +325,10 @@ func (p *Pipeline) Convert(ctx context.Context, title, author string, chapters [
 	if err != nil {
 		writeSpan.RecordError(err)
 		writeSpan.End()
+		p.mu.Lock()
+		p.status.State = "failed"
+		p.status.Error = err.Error()
+		p.mu.Unlock()
 		p.publishEvent(observability.PipelineEvent{
 			Type:  observability.EventError,
 			Step:  "generate_scenes",
@@ -207,12 +337,25 @@ func (p *Pipeline) Convert(ctx context.Context, title, author string, chapters [
 		return nil, fmt.Errorf("scene generation failed: %w", err)
 	}
 	writeSpan.End()
+	sceneHeadings := make([]string, 0, len(scenes))
+	for _, sc := range scenes {
+		sceneHeadings = append(sceneHeadings, sc.Heading)
+	}
 	p.publishEvent(observability.PipelineEvent{
 		Type:     observability.EventSceneWritten,
 		Step:     "generate_scenes",
 		Message:  fmt.Sprintf("场景生成完成: %d 场景", len(scenes)),
 		Duration: durationPtr(time.Since(stepStart)),
+		Details: map[string]interface{}{
+			"scenes_count": len(scenes),
+			"scenes":       sceneHeadings,
+		},
 	})
+
+	p.mu.Lock()
+	p.status.CurrentStep = "editor_review"
+	p.status.Progress = 80
+	p.mu.Unlock()
 
 	// Assemble screenplay
 	genre := []string{}
@@ -267,10 +410,17 @@ func (p *Pipeline) Convert(ctx context.Context, title, author string, chapters [
 			Details: map[string]interface{}{
 				"issues_count":  len(editResult.Issues),
 				"changes_count": len(editResult.Changes),
+				"issues":        editResult.Issues,
+				"changes":       editResult.Changes,
 			},
 		})
 	}
 	editorSpan.End()
+
+	p.mu.Lock()
+	p.status.CurrentStep = "validation"
+	p.status.Progress = 90
+	p.mu.Unlock()
 
 	// Step 13: Validation
 	stepStart = time.Now()
@@ -299,7 +449,27 @@ func (p *Pipeline) Convert(ctx context.Context, title, author string, chapters [
 		Duration: durationPtr(time.Since(stepStart)),
 	})
 
+	p.mu.Lock()
+	p.status.CurrentStep = "completed"
+	p.status.Progress = 100
+	p.mu.Unlock()
+
 	totalDuration := time.Since(startTime)
+	yamlBytes, _ := yaml.Marshal(screenplay)
+
+	p.mu.Lock()
+	p.lastResult = &PipelineResult{
+		Tree:        st,
+		GraphMgr:    graphMgr,
+		Plans:       plans,
+		Screenplay:  screenplay,
+		YAMLStr:     string(yamlBytes),
+		Duration:    totalDuration,
+		CompletedAt: time.Now(),
+	}
+	p.status.State = "completed"
+	p.mu.Unlock()
+
 	p.publishEvent(observability.PipelineEvent{
 		Type:     observability.EventPipelineEnd,
 		Step:     "pipeline",
@@ -308,9 +478,10 @@ func (p *Pipeline) Convert(ctx context.Context, title, author string, chapters [
 		Details: map[string]interface{}{
 			"scenes_count":     len(screenplay.Scenes),
 			"characters_count": len(screenplay.Characters),
+			"screenplay":       screenplay,
+			"yaml":             string(yamlBytes),
 		},
 	})
-
 
 	return screenplay, nil
 }
@@ -426,6 +597,16 @@ func (p *Pipeline) analyzeNodes(ctx context.Context, st *tree.StoryTree, depth i
 		default:
 			node.Decision = tree.DecisionKeep
 		}
+
+		p.publishEvent(observability.PipelineEvent{
+			Type:    observability.EventNodeAnalyzed,
+			Step:    "analyze_node",
+			NodeID:  node.ID,
+			Message: fmt.Sprintf("节点 %s 分析完成: %s", node.ID, node.Decision),
+			Details: map[string]interface{}{
+				"node": node,
+			},
+		})
 	}
 
 	// Split nodes that need further decomposition
@@ -441,11 +622,29 @@ func (p *Pipeline) analyzeNodes(ctx context.Context, st *tree.StoryTree, depth i
 	return nil
 }
 
-// splitNode divides a node into child nodes.
+// splitNode divides a node into child nodes and emits events for each.
 func (p *Pipeline) splitNode(st *tree.StoryTree, node *tree.StoryNode) {
-	splitter := tree.NewSplitter(p.config.MaxChunkSize / 2) // smaller chunks for children
+	splitter := tree.NewSplitter(p.config.MaxChunkSize / 2)
 	chunks := splitter.SplitChapters([]string{node.TextContent})
 	leaves := chunks.CollectLeaves()
+
+	// Re-ID to avoid collisions: parentID_c001, parentID_c002, ...
+	oldToNew := make(map[string]string, len(leaves))
+	for i, child := range leaves {
+		oldID := child.ID
+		newID := fmt.Sprintf("%s_c%03d", node.ID, i+1)
+		delete(st.Nodes, oldID)
+		child.ID = newID
+		oldToNew[oldID] = newID
+	}
+	// Fix RightNeighbor references
+	for _, child := range leaves {
+		if child.RightNeighbor != "" {
+			if newRN, ok := oldToNew[child.RightNeighbor]; ok {
+				child.RightNeighbor = newRN
+			}
+		}
+	}
 
 	node.ChildrenIDs = make([]string, 0, len(leaves))
 	for _, child := range leaves {
@@ -454,6 +653,16 @@ func (p *Pipeline) splitNode(st *tree.StoryTree, node *tree.StoryNode) {
 		child.SourceChapter = node.SourceChapter
 		st.AddNode(child)
 		node.ChildrenIDs = append(node.ChildrenIDs, child.ID)
+
+		p.publishEvent(observability.PipelineEvent{
+			Type:    observability.EventTreeNodeAdded,
+			Step:    "analyze_node",
+			NodeID:  child.ID,
+			Message: fmt.Sprintf("节点拆分: %s → %s", node.ID, child.ID),
+			Details: map[string]interface{}{
+				"node": child,
+			},
+		})
 	}
 }
 
@@ -545,11 +754,24 @@ func (p *Pipeline) updateGraph(ctx context.Context, st *tree.StoryTree) (*graph.
 		graphMgr.ApplyUpdate(leafID, update)
 		graphNodeSpan.End()
 
+		newCharNames := make([]string, len(update.NewCharacters))
+		for j, nc := range update.NewCharacters {
+			newCharNames[j] = nc.Name
+		}
+		newRelDescs := make([]string, len(update.RelationChanges))
+		for j, rc := range update.RelationChanges {
+			newRelDescs[j] = fmt.Sprintf("%s-%s", rc.CharA, rc.CharB)
+		}
+
 		p.publishEvent(observability.PipelineEvent{
 			Type:    observability.EventGraphUpdated,
 			Step:    "graph_update",
 			NodeID:  leafID,
 			Message: fmt.Sprintf("图更新完成: %s", leafID),
+			Details: map[string]interface{}{
+				"new_characters": newCharNames,
+				"new_relations":  newRelDescs,
+			},
 		})
 
 		// Chain to next node

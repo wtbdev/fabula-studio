@@ -54,7 +54,6 @@ func NewGraphAnalyzerAgent(modelName, apiKey, baseURL string) *GraphAnalyzerAgen
 	}
 	m := openai.New(modelName, opts...)
 	genConfig := model.GenerationConfig{
-		MaxTokens:   intPtr(4096),
 		Temperature: floatPtr(0.3),
 	}
 

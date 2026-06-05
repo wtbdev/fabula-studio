@@ -15,6 +15,7 @@ import (
 
 	"github.com/fabula-studio/backend/internal/agent"
 	"github.com/fabula-studio/backend/internal/schema"
+	"github.com/fabula-studio/backend/internal/util"
 )
 
 // Converter orchestrates the pipeline: novel text → analysis → screenplay YAML.
@@ -82,6 +83,11 @@ func (c *Converter) analyzeChapter(ctx context.Context, index int, text string) 
 		return nil, err
 	}
 
+	response, err = util.PrepareJSON(response, "chapter analysis output")
+	if err != nil {
+		return nil, err
+	}
+
 	analysis := &schema.NovelAnalysis{}
 	if err := json.Unmarshal([]byte(response), analysis); err != nil {
 		return nil, fmt.Errorf("分析结果JSON解析失败: %w\n原始输出: %s", err, response)
@@ -110,7 +116,7 @@ func (c *Converter) generateScreenplay(ctx context.Context, analysis *schema.Nov
 		return "", err
 	}
 
-	return strings.TrimSpace(yamlStr), nil
+	return util.PrepareYAML(yamlStr, "screenplay writer output")
 }
 
 // runAgent executes a single-turn agent run and returns the text response.
@@ -137,7 +143,11 @@ func (c *Converter) runAgent(ctx context.Context, agt *llmagent.LLMAgent, prompt
 			}
 		}
 	}
-	return sb.String(), nil
+	result := strings.TrimSpace(sb.String())
+	if result == "" {
+		return "", fmt.Errorf("agent returned empty response")
+	}
+	return result, nil
 }
 
 // mergeAnalyses combines per-chapter analyses into one.

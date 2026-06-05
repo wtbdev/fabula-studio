@@ -11,7 +11,7 @@ import (
 	"trpc.group/trpc-go/trpc-agent-go/model/openai"
 
 	"github.com/fabula-studio/backend/internal/schema"
-
+	"github.com/fabula-studio/backend/internal/util"
 )
 
 // ChiefEditorAgent reviews and revises the complete screenplay.
@@ -63,7 +63,6 @@ func NewChiefEditorAgent(modelName, apiKey, baseURL string) *ChiefEditorAgent {
 	}
 	m := openai.New(modelName, opts...)
 	genConfig := model.GenerationConfig{
-		MaxTokens:   intPtr(16384),
 		Temperature: floatPtr(0.4),
 	}
 
@@ -92,6 +91,11 @@ func (a *ChiefEditorAgent) ReviewAndRevise(ctx context.Context, sp *schema.Scree
 	prompt := fmt.Sprintf("Review and revise this screenplay:\n```yaml\n%s\n```", string(spYAML))
 
 	raw, err := Run(ctx, a.agent, prompt)
+	if err != nil {
+		return nil, err
+	}
+
+	raw, err = util.PrepareJSON(raw, "editor output")
 	if err != nil {
 		return nil, err
 	}

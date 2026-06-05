@@ -71,7 +71,6 @@ func NewSceneWriterAgent(modelName, apiKey, baseURL string) *SceneWriterAgent {
 	}
 	m := openai.New(modelName, opts...)
 	genConfig := model.GenerationConfig{
-		MaxTokens:   intPtr(8192),
 		Temperature: floatPtr(0.7),
 	}
 
@@ -98,7 +97,10 @@ func (a *SceneWriterAgent) WriteScene(ctx context.Context, sceneCtx *scene.Scene
 		return nil, err
 	}
 
-	raw = util.RepairYAML(raw)
+	raw, err = util.PrepareYAML(raw, "scene writer output")
+	if err != nil {
+		return nil, err
+	}
 
 	var sc schema.Scene
 	if err := yaml.Unmarshal([]byte(raw), &sc); err != nil {

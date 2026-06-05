@@ -14,6 +14,8 @@ type EventType string
 const (
 	EventPipelineStart   EventType = "pipeline_start"
 	EventPipelineEnd     EventType = "pipeline_end"
+	EventTreeSnapshot    EventType = "tree_snapshot"
+	EventTreeNodeAdded   EventType = "tree_node_added"
 	EventNodeAnalyzing   EventType = "node_analyzing"
 	EventNodeAnalyzed    EventType = "node_analyzed"
 	EventNodeFailed      EventType = "node_failed"
@@ -108,6 +110,13 @@ func (b *EventBus) GetEventLog() []PipelineEvent {
 	result := make([]PipelineEvent, len(b.eventLog))
 	copy(result, b.eventLog)
 	return result
+}
+
+// Clear removes all events from the log.
+func (b *EventBus) Clear() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.eventLog = b.eventLog[:0]
 }
 
 // SSEHandler returns an HTTP handler for Server-Sent Events.

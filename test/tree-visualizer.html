@@ -1,0 +1,818 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Fabula Studio — 管线树可视化</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Segoe UI', monospace;
+            background: #1a1a2e;
+            color: #eee;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        header {
+            padding: 10px 20px;
+            background: #0f3460;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            flex-shrink: 0;
+        }
+        header h1 { font-size: 18px; color: #00d4ff; }
+        header .status-badge {
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        .status-idle { background: #555; }
+        .status-running { background: #f39c12; color: #000; animation: pulse 1.5s infinite; }
+        .status-completed { background: #2ecc71; color: #000; }
+        .status-failed { background: #e74c3c; }
+        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.6; } }
+
+        .main-layout {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        /* Left panel */
+        .left-panel {
+            width: 280px;
+            min-width: 280px;
+            background: #16213e;
+            border-right: 1px solid #0f3460;
+            padding: 16px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+        .left-panel h3 { color: #00d4ff; font-size: 13px; text-transform: uppercase; margin-bottom: 8px; }
+        .left-panel label { font-size: 12px; color: #aaa; display: block; margin-bottom: 4px; }
+        .left-panel input, .left-panel textarea {
+            width: 100%;
+            padding: 8px;
+            background: #0a0a1a;
+            color: #eee;
+            border: 1px solid #0f3460;
+            border-radius: 4px;
+            font-size: 13px;
+            font-family: inherit;
+        }
+        .left-panel textarea { resize: vertical; min-height: 80px; }
+        .left-panel button {
+            padding: 10px 16px;
+            background: #00d4ff;
+            color: #000;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+            transition: background 0.2s;
+        }
+        .left-panel button:hover { background: #00b8d4; }
+        .left-panel button:disabled { background: #555; cursor: not-allowed; }
+        .progress-bar {
+            height: 6px;
+            background: #0a0a1a;
+            border-radius: 3px;
+            overflow: hidden;
+        }
+        .progress-fill {
+            height: 100%;
+            background: #00d4ff;
+            transition: width 0.3s;
+            border-radius: 3px;
+        }
+        .step-info { font-size: 12px; color: #aaa; }
+
+        /* Center: SVG tree */
+        .center-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .tree-container {
+            flex: 1;
+            overflow: auto;
+            background: #0a0a1a;
+            position: relative;
+        }
+        .tree-container svg { display: block; }
+        .tree-container .node-rect {
+            cursor: pointer;
+            stroke-width: 2;
+            rx: 6;
+            ry: 6;
+            transition: stroke 0.2s;
+        }
+        .tree-container .node-rect:hover { stroke: #fff; stroke-width: 3; }
+        .tree-container .node-text {
+            font-size: 11px;
+            fill: #eee;
+            pointer-events: none;
+            font-family: 'Segoe UI', monospace;
+        }
+        .tree-container .link {
+            fill: none;
+            stroke: #334;
+            stroke-width: 1.5;
+        }
+        .tree-legend {
+            padding: 8px 16px;
+            background: #16213e;
+            border-top: 1px solid #0f3460;
+            display: flex;
+            gap: 16px;
+            font-size: 11px;
+            flex-shrink: 0;
+        }
+        .legend-item { display: flex; align-items: center; gap: 4px; }
+        .legend-dot { width: 10px; height: 10px; border-radius: 2px; }
+
+        /* Right panel: node details */
+        .right-panel {
+            width: 320px;
+            min-width: 320px;
+            background: #16213e;
+            border-left: 1px solid #0f3460;
+            padding: 16px;
+            overflow-y: auto;
+        }
+        .right-panel h3 { color: #00d4ff; font-size: 13px; text-transform: uppercase; margin-bottom: 12px; }
+        .detail-field { margin-bottom: 10px; }
+        .detail-field .label { font-size: 11px; color: #888; text-transform: uppercase; margin-bottom: 2px; }
+        .detail-field .value { font-size: 13px; line-height: 1.5; }
+        .detail-field .value.list { display: flex; flex-wrap: wrap; gap: 4px; }
+        .detail-field .value.list span {
+            background: #0f3460;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 11px;
+        }
+        .no-selection { color: #555; font-size: 13px; text-align: center; padding: 40px 0; }
+
+        /* Bottom panel */
+        .bottom-panel {
+            height: 260px;
+            min-height: 200px;
+            background: #16213e;
+            border-top: 1px solid #0f3460;
+            display: flex;
+            flex-shrink: 0;
+        }
+        .bottom-section {
+            flex: 1;
+            padding: 12px 16px;
+            overflow-y: auto;
+            border-right: 1px solid #0f3460;
+        }
+        .bottom-section:last-child { border-right: none; }
+        .bottom-section h3 {
+            color: #00d4ff;
+            font-size: 12px;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+        }
+        .bottom-section table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+        .bottom-section th {
+            text-align: left;
+            padding: 4px 8px;
+            border-bottom: 1px solid #0f3460;
+            color: #888;
+            font-weight: normal;
+        }
+        .bottom-section td {
+            padding: 4px 8px;
+            border-bottom: 1px solid #111;
+        }
+        .scene-card {
+            padding: 8px;
+            margin-bottom: 6px;
+            background: #0a0a1a;
+            border-radius: 4px;
+            border-left: 3px solid #00d4ff;
+        }
+        .scene-card .heading { font-weight: bold; font-size: 12px; }
+        .scene-card .synopsis { font-size: 11px; color: #aaa; margin-top: 4px; }
+
+        /* Log panel */
+        .log-panel {
+            padding: 8px 16px;
+            background: #0a0a1a;
+            border-top: 1px solid #0f3460;
+            max-height: 120px;
+            overflow-y: auto;
+            font-size: 11px;
+            flex-shrink: 0;
+        }
+        .log-entry { margin: 2px 0; color: #888; }
+        .log-entry .ts { color: #555; }
+        .log-entry.error { color: #e74c3c; }
+        .log-entry.success { color: #2ecc71; }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>🌳 Fabula Studio — 管线树可视化</h1>
+        <span id="statusBadge" class="status-badge status-idle">IDLE</span>
+        <span id="stepLabel" class="step-info"></span>
+    </header>
+
+    <div class="main-layout">
+        <!-- Left: Controls -->
+        <div class="left-panel">
+            <div>
+                <h3>管线控制</h3>
+                <label>小说标题 <span style="color:#666">（可选）</span></label>
+                <input type="text" id="titleInput" placeholder="可不填，默认：未命名小说" value="">
+                <label style="margin-top:8px">作者 <span style="color:#666">（可选）</span></label>
+                <input type="text" id="authorInput" placeholder="可不填，默认：未知作者" value="">
+                <label style="margin-top:8px">小说全文</label>
+                <textarea id="chaptersInput" placeholder="直接粘贴全文即可，自动按段落分组"></textarea>
+                <button id="startBtn" onclick="startConversion()" style="margin-top:12px;width:100%">▶ 开始转换</button>
+            </div>
+
+            <div>
+                <h3>进度</h3>
+                <div class="progress-bar"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
+                <div class="step-info" id="progressLabel" style="margin-top:6px">等待开始...</div>
+            </div>
+
+            <div>
+                <h3>快速操作</h3>
+                <button onclick="fetchStatus()" style="background:#0f3460;width:100%;margin-bottom:6px">刷新状态</button>
+                <button onclick="fetchFullTree()" style="background:#0f3460;width:100%;margin-bottom:6px">拉取完整树</button>
+                <button onclick="fetchGraph()" style="background:#0f3460;width:100%;margin-bottom:6px">拉取角色图谱</button>
+                <button onclick="fetchPlans()" style="background:#0f3460;width:100%;margin-bottom:6px">拉取场景规划</button>
+            </div>
+        </div>
+
+        <!-- Center: Tree SVG -->
+        <div class="center-panel">
+            <div class="tree-container" id="treeContainer">
+                <svg id="treeSvg" width="1200" height="800">
+                    <text x="600" y="400" text-anchor="middle" fill="#334" font-size="16" font-family="monospace">
+                        等待管线运行...
+                    </text>
+                </svg>
+            </div>
+            <div class="tree-legend">
+                <div class="legend-item"><div class="legend-dot" style="background:#2ecc71"></div> keep</div>
+                <div class="legend-item"><div class="legend-dot" style="background:#3498db"></div> split</div>
+                <div class="legend-item"><div class="legend-dot" style="background:#f1c40f"></div> merge_right</div>
+                <div class="legend-item"><div class="legend-dot" style="background:#95a5a6"></div> summarize_only</div>
+                <div class="legend-item"><div class="legend-dot" style="background:#e74c3c"></div> discard</div>
+            </div>
+        </div>
+
+        <!-- Right: Node Details -->
+        <div class="right-panel">
+            <h3>节点详情</h3>
+            <div id="nodeDetails">
+                <div class="no-selection">点击树节点查看详情</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bottom: Graph + Plans + Scenes -->
+    <div class="bottom-panel">
+        <div class="bottom-section" style="flex:1.2">
+            <h3>角色图谱</h3>
+            <table>
+                <thead><tr><th>角色</th><th>目标</th><th>情绪</th><th>已知信息</th></tr></thead>
+                <tbody id="charTableBody"><tr><td colspan="4" style="color:#555">暂无数据</td></tr></tbody>
+            </table>
+        </div>
+        <div class="bottom-section" style="flex:0.8">
+            <h3>场景规划</h3>
+            <div id="plansList" style="color:#555;font-size:12px">暂无数据</div>
+        </div>
+        <div class="bottom-section" style="flex:1">
+            <h3>已生成场景</h3>
+            <div id="scenesList" style="color:#555;font-size:12px">暂无数据</div>
+        </div>
+    </div>
+
+    <!-- Log -->
+    <div class="log-panel" id="logPanel"></div>
+
+    <script>
+    const API = '';  // same origin
+    let eventSource = null;
+    let treeData = null;
+    let selectedNodeId = null;
+
+    // ---- Logging ----
+    function log(msg, cls = '') {
+        const p = document.getElementById('logPanel');
+        const ts = new Date().toLocaleTimeString();
+        const div = document.createElement('div');
+        div.className = 'log-entry ' + cls;
+        div.innerHTML = `<span class="ts">[${ts}]</span> ${msg}`;
+        p.appendChild(div);
+        p.scrollTop = p.scrollHeight;
+    }
+
+    // ---- Status ----
+    async function fetchStatus() {
+        try {
+            const r = await fetch(API + '/api/pipeline/status');
+            const d = await r.json();
+            updateStatusUI(d);
+        } catch (e) {
+            log('获取状态失败: ' + e.message, 'error');
+        }
+    }
+
+    function updateStatusUI(s) {
+        const badge = document.getElementById('statusBadge');
+        badge.textContent = (s.state || 'idle').toUpperCase();
+        badge.className = 'status-badge status-' + (s.state || 'idle');
+        document.getElementById('stepLabel').textContent = s.current_step || '';
+        document.getElementById('progressFill').style.width = (s.progress || 0) + '%';
+        document.getElementById('progressLabel').textContent =
+            !s.state || s.state === 'idle' ? '等待开始...' :
+            s.state === 'running' ? `${s.current_step} (${s.progress}%)` :
+            s.state === 'completed' ? '完成!' :
+            s.state === 'failed' ? '失败: ' + (s.error || '') : '';
+    }
+
+    // ---- Conversion ----
+    async function startConversion() {
+        const title = document.getElementById('titleInput').value.trim();
+        const author = document.getElementById('authorInput').value.trim();
+        const raw = document.getElementById('chaptersInput').value.trim();
+        if (!raw) { log('请填写小说文本', 'error'); return; }
+
+        let chapters;
+        const chapterPattern = /^第[一二三四五六七八九十百千\d]+[章回节卷集部篇]|^Chapter\s+\d+|^CHAPTER\s+\d+/m;
+        if (chapterPattern.test(raw)) {
+            chapters = raw.split(/(?=^第[一二三四五六七八九十百千\d]+[章回节卷集部篇]|^Chapter\s+\d+|^CHAPTER\s+\d+)/m)
+                .map(c => c.trim()).filter(c => c.length > 0);
+        } else {
+            const paras = raw.split(/\n\s*\n/).map(p => p.trim()).filter(p => p.length > 0);
+            chapters = [];
+            let buf = '';
+            for (const p of paras) {
+                if (buf.length + p.length > 2000 && buf.length > 0) {
+                    chapters.push(buf);
+                    buf = p;
+                } else {
+                    buf = buf ? buf + '\n\n' + p : p;
+                }
+            }
+            if (buf) chapters.push(buf);
+        }
+        if (chapters.length === 0) { log('未检测到有效文本', 'error'); return; }
+
+        // Reset state for new conversion
+        treeData = null;
+        selectedNodeId = null;
+        document.getElementById('nodeDetails').innerHTML = '<div class="no-selection">点击树节点查看详情</div>';
+        clearSvg();
+
+        document.getElementById('startBtn').disabled = true;
+        log(`开始转换: ${title || '未命名小说'} (${chapters.length} 段文本)`);
+
+        connectSSE();
+
+        try {
+            const r = await fetch(API + '/api/convert', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title, author, chapters })
+            });
+            const d = await r.json();
+            if (d.error) {
+                log('转换失败: ' + d.error, 'error');
+            } else {
+                log('转换成功!', 'success');
+                await fetchFullTree();
+                await fetchGraph();
+                await fetchPlans();
+            }
+        } catch (e) {
+            log('请求失败: ' + e.message, 'error');
+        } finally {
+            document.getElementById('startBtn').disabled = false;
+        }
+    }
+
+    // ---- SSE ----
+    function connectSSE() {
+        if (eventSource) { eventSource.close(); }
+        eventSource = new EventSource(API + '/api/events/stream');
+        eventSource.onmessage = (e) => {
+            try {
+                const evt = JSON.parse(e.data);
+                handleEvent(evt);
+            } catch {}
+        };
+        eventSource.onerror = () => {
+            log('SSE 连接断开', 'error');
+        };
+    }
+
+    function handleEvent(evt) {
+        const details = evt.details || {};
+
+        switch (evt.type) {
+            case 'pipeline_start':
+                log('管线启动: ' + evt.message);
+                break;
+
+            case 'tree_snapshot':
+                // Full initial tree from buildTree — render immediately
+                if (details.tree) {
+                    treeData = details.tree;
+                    renderTree();
+                    log('故事树已构建: ' + Object.keys(treeData.nodes).length + ' 节点', 'success');
+                }
+                break;
+
+            case 'tree_node_added':
+                // New child node from splitNode — add incrementally
+                if (details.node) {
+                    addNodeFromData(details.node);
+                    log('节点拆分: ' + evt.message);
+                }
+                break;
+
+            case 'node_analyzing':
+                // Highlight the node being analyzed
+                if (evt.node_id && treeData && treeData.nodes[evt.node_id]) {
+                    treeData.nodes[evt.node_id]._analyzing = true;
+                    renderTree();
+                }
+                fetchStatus();
+                break;
+
+            case 'node_analyzed':
+                if (evt.step === 'analyze_node' && details.node) {
+                    // Full node update from analysis
+                    updateNodeFromData(details.node);
+                }
+                break;
+
+            case 'graph_updated':
+                if (details.new_characters && details.new_characters.length > 0) {
+                    log('新角色: ' + details.new_characters.join(', '));
+                }
+                if (details.characters_count !== undefined) {
+                    log('角色图谱: ' + details.characters_count + ' 角色');
+                }
+                fetchStatus();
+                break;
+
+            case 'scene_planned':
+                if (details.plans) {
+                    renderPlans(details.plans);
+                }
+                log('场景规划完成: ' + (details.plans_count || 0) + ' 计划', 'success');
+                fetchStatus();
+                break;
+
+            case 'scene_written':
+                if (details.scenes) {
+                    renderSceneHeadings(details.scenes);
+                }
+                log('场景生成: ' + evt.message, 'success');
+                fetchStatus();
+                break;
+
+            case 'editor_reviewed':
+                if (details.issues) {
+                    log('总编审查: ' + details.issues.length + ' 个问题');
+                }
+                fetchStatus();
+                break;
+
+            case 'pipeline_end':
+                log('管线完成! ' + evt.message, 'success');
+                if (details.screenplay) {
+                    renderScreenplay(details.screenplay);
+                }
+                fetchStatus();
+                fetchFullTree();
+                break;
+
+            case 'error':
+                log('错误: ' + (evt.error || evt.message), 'error');
+                break;
+        }
+    }
+
+    // ---- Node Management ----
+    function ensureTreeData() {
+        if (!treeData) {
+            treeData = { root_node_id: '', nodes: {}, leaf_node_ids: [], max_depth: 0 };
+        }
+    }
+
+    function addNodeFromData(node) {
+        ensureTreeData();
+        treeData.nodes[node.id] = node;
+        if (!treeData.root_node_id && node.level <= 0) {
+            treeData.root_node_id = node.id;
+        }
+        renderTree();
+    }
+
+    function updateNodeFromData(node) {
+        ensureTreeData();
+        const existing = treeData.nodes[node.id];
+        if (existing) {
+            // Merge: preserve layout hints, update analysis fields
+            Object.assign(existing, node);
+        } else {
+            treeData.nodes[node.id] = node;
+        }
+        if (!treeData.root_node_id && node.level <= 0) {
+            treeData.root_node_id = node.id;
+        }
+        renderTree();
+        // Re-render details if this node is selected
+        if (selectedNodeId === node.id) {
+            renderNodeDetails(node.id);
+        }
+    }
+
+    // ---- Fetch Full Tree ----
+    async function fetchFullTree() {
+        try {
+            const r = await fetch(API + '/api/tree');
+            if (!r.ok) { log('暂无树数据', 'error'); return; }
+            treeData = await r.json();
+            renderTree();
+            log('完整树已加载: ' + Object.keys(treeData.nodes).length + ' 节点', 'success');
+        } catch (e) { log('拉取树失败: ' + e.message, 'error'); }
+    }
+
+    // ---- Fetch Graph ----
+    async function fetchGraph() {
+        try {
+            const r = await fetch(API + '/api/graph');
+            if (!r.ok) { log('暂无图谱数据', 'error'); return; }
+            const d = await r.json();
+            renderGraph(d);
+            log('角色图谱已加载: ' + (d.characters || []).length + ' 角色', 'success');
+        } catch (e) { log('拉取图谱失败: ' + e.message, 'error'); }
+    }
+
+    // ---- Fetch Plans ----
+    async function fetchPlans() {
+        try {
+            const r = await fetch(API + '/api/plans');
+            if (!r.ok) { log('暂无规划数据', 'error'); return; }
+            const d = await r.json();
+            renderPlans(d.plans || []);
+            log('场景规划已加载', 'success');
+        } catch (e) { log('拉取规划失败: ' + e.message, 'error'); }
+    }
+
+    // ---- SVG Tree Rendering ----
+    const NODE_W = 140, NODE_H = 40, H_GAP = 16, V_GAP = 60;
+    const decisionColors = {
+        keep: '#2ecc71', split: '#3498db', merge_right: '#f1c40f',
+        summarize_only: '#95a5a6', discard: '#e74c3c'
+    };
+
+    function clearSvg() {
+        const svg = document.getElementById('treeSvg');
+        svg.innerHTML = '<text x="600" y="300" text-anchor="middle" fill="#334" font-size="16" font-family="monospace">等待管线运行...</text>';
+        svg.setAttribute('width', 1200);
+        svg.setAttribute('height', 600);
+    }
+
+    function renderTree() {
+        if (!treeData || !treeData.root_node_id) return;
+        const svg = document.getElementById('treeSvg');
+        const allNodes = treeData.nodes;
+        const root = allNodes[treeData.root_node_id];
+        if (!root) return;
+
+        // Build children map
+        const childrenOf = {};
+        for (const id in allNodes) {
+            const n = allNodes[id];
+            if (n.children_ids && n.children_ids.length > 0) {
+                childrenOf[id] = n.children_ids.filter(cid => allNodes[cid]);
+            }
+        }
+
+        // Recursive layout: compute subtree width, then position children centered under parent
+        const positions = {};
+        const subtreeWidths = {};
+
+        function computeSubtreeWidth(id) {
+            const kids = childrenOf[id] || [];
+            if (kids.length === 0) {
+                subtreeWidths[id] = NODE_W;
+                return NODE_W;
+            }
+            let total = 0;
+            for (const cid of kids) {
+                total += computeSubtreeWidth(cid);
+            }
+            total += (kids.length - 1) * H_GAP;
+            subtreeWidths[id] = Math.max(NODE_W, total);
+            return subtreeWidths[id];
+        }
+
+        function assignPositions(id, x, y) {
+            positions[id] = { x: x, y: y };
+            const kids = childrenOf[id] || [];
+            if (kids.length === 0) return;
+
+            const totalChildWidth = subtreeWidths[id];
+            let cx = x - totalChildWidth / 2 + NODE_W / 2;
+            for (const cid of kids) {
+                const w = subtreeWidths[cid];
+                assignPositions(cid, cx + w / 2 - NODE_W / 2, y + NODE_H + V_GAP);
+                cx += w + H_GAP;
+            }
+        }
+
+        computeSubtreeWidth(treeData.root_node_id);
+        const rootX = Math.max(subtreeWidths[treeData.root_node_id] / 2, 600);
+        assignPositions(treeData.root_node_id, rootX, 30);
+
+        // Compute SVG dimensions
+        let maxX = 0, maxY = 0;
+        for (const id in positions) {
+            const p = positions[id];
+            if (p.x + NODE_W > maxX) maxX = p.x + NODE_W;
+            if (p.y + NODE_H > maxY) maxY = p.y + NODE_H;
+        }
+        const svgW = Math.max(1200, maxX + 60);
+        const svgH = Math.max(600, maxY + 60);
+        svg.setAttribute('width', svgW);
+        svg.setAttribute('height', svgH);
+
+        // Build SVG content
+        let html = '';
+
+        // Draw links
+        for (const pid in childrenOf) {
+            const pp = positions[pid];
+            if (!pp) continue;
+            for (const cid of childrenOf[pid]) {
+                const cp = positions[cid];
+                if (!cp) continue;
+                const x1 = pp.x + NODE_W / 2, y1 = pp.y + NODE_H;
+                const x2 = cp.x + NODE_W / 2, y2 = cp.y;
+                const my = (y1 + y2) / 2;
+                html += `<path class="link" d="M${x1},${y1} C${x1},${my} ${x2},${my} ${x2},${y2}"/>`;
+            }
+        }
+
+        // Draw nodes
+        for (const id in positions) {
+            const n = allNodes[id];
+            if (!n) continue;
+            const p = positions[id];
+            const isRoot = id === treeData.root_node_id;
+            const color = isRoot ? '#00d4ff' : (decisionColors[n.decision] || '#555');
+            const isSelected = id === selectedNodeId;
+            const isAnalyzing = n._analyzing;
+
+            // Label: root shows title, others show summary or ID
+            let label;
+            if (isRoot) {
+                label = '📖 ' + (n.summary || n.text_content?.substring(0, 12) || 'ROOT');
+            } else {
+                label = n.summary ? n.summary.substring(0, 14) + (n.summary.length > 14 ? '…' : '') : id;
+            }
+
+            const strokeColor = isAnalyzing ? '#f39c12' : (isSelected ? '#fff' : color);
+            const strokeW = isAnalyzing ? 3 : (isSelected ? 3 : 2);
+            const fillOpacity = isAnalyzing ? '55' : '33';
+
+            html += `<rect class="node-rect" x="${p.x}" y="${p.y}" width="${NODE_W}" height="${NODE_H}"
+                        fill="${color}${fillOpacity}" stroke="${strokeColor}" stroke-width="${strokeW}"
+                        data-id="${id}" onclick="selectNode('${id}')"/>`;
+            html += `<text class="node-text" x="${p.x + NODE_W/2}" y="${p.y + NODE_H/2 + 4}"
+                        text-anchor="middle">${escapeHtml(label)}</text>`;
+            if (!isRoot && n.decision) {
+                html += `<text x="${p.x + 4}" y="${p.y + 11}" font-size="9" fill="${color}" font-family="monospace">${n.decision}</text>`;
+            }
+            if (n.level !== undefined && n.level >= 0) {
+                html += `<text x="${p.x + NODE_W - 4}" y="${p.y + 11}" font-size="9" fill="#556" text-anchor="end" font-family="monospace">L${n.level}</text>`;
+            }
+        }
+
+        svg.innerHTML = html;
+    }
+
+    function escapeHtml(s) {
+        return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    // ---- Node Selection ----
+    function selectNode(id) {
+        selectedNodeId = id;
+        renderTree();
+        renderNodeDetails(id);
+    }
+
+    function renderNodeDetails(id) {
+        const panel = document.getElementById('nodeDetails');
+        const n = treeData && treeData.nodes[id];
+        if (!n) { panel.innerHTML = '<div class="no-selection">节点未找到</div>'; return; }
+
+        const isRoot = id === treeData.root_node_id;
+        let html = '';
+        html += field('ID', n.id + (isRoot ? ' (根节点)' : ''));
+        html += field('层级', n.level !== undefined ? String(n.level) : '-');
+        if (n.decision) html += field('决策', `<span style="color:${decisionColors[n.decision] || '#fff'}">${n.decision}</span>`);
+        if (n.summary) html += field('摘要', escapeHtml(n.summary));
+        if (n.main_conflict) html += field('主要冲突', escapeHtml(n.main_conflict));
+        if (n.characters && n.characters.length) html += listField('角色', n.characters);
+        if (n.events && n.events.length) {
+            const evts = n.events.map(e => e.description || JSON.stringify(e));
+            html += listField('事件', evts);
+        }
+        if (n.location) html += field('地点', escapeHtml(n.location));
+        if (n.time_frame) html += field('时间', escapeHtml(n.time_frame));
+        if (n.split_reason) html += field('拆分原因', escapeHtml(n.split_reason));
+        if (n.text_content) html += field('文本', escapeHtml(n.text_content.substring(0, 200)) + (n.text_content.length > 200 ? '…' : ''));
+        if (n.children_ids && n.children_ids.length) html += listField('子节点', n.children_ids);
+        if (n.parent_id) html += field('父节点', n.parent_id);
+        if (n.right_neighbor) html += field('右邻居', n.right_neighbor);
+
+        panel.innerHTML = html;
+    }
+
+    function field(label, value) {
+        return `<div class="detail-field"><div class="label">${label}</div><div class="value">${value}</div></div>`;
+    }
+    function listField(label, items) {
+        const spans = items.map(i => `<span>${escapeHtml(String(i))}</span>`).join('');
+        return `<div class="detail-field"><div class="label">${label}</div><div class="value list">${spans}</div></div>`;
+    }
+
+    // ---- Graph Rendering ----
+    function renderGraph(data) {
+        const tbody = document.getElementById('charTableBody');
+        const chars = data.characters || [];
+        if (chars.length === 0) { tbody.innerHTML = '<tr><td colspan="4" style="color:#555">暂无数据</td></tr>'; return; }
+        tbody.innerHTML = chars.map(c => `<tr>
+            <td>${escapeHtml(c.name || c.id)}</td>
+            <td>${escapeHtml(c.current_goal || '-')}</td>
+            <td>${escapeHtml(c.emotional_state || '-')}</td>
+            <td>${(c.known_info || []).join(', ') || '-'}</td>
+        </tr>`).join('');
+    }
+
+    // ---- Plans Rendering ----
+    function renderPlans(plans) {
+        const div = document.getElementById('plansList');
+        if (!plans || plans.length === 0) { div.innerHTML = '<span style="color:#555">暂无数据</span>'; return; }
+        div.innerHTML = plans.map(p => `<div class="scene-card">
+            <div class="heading">${escapeHtml(p.id || '?')} — ${escapeHtml(p.purpose || '')}</div>
+            <div class="synopsis">📍 ${escapeHtml(p.location || '?')} | 🎬 ${p.scene_count || 0} 场景 | 节点: ${(p.source_node_ids || []).join(', ')}</div>
+        </div>`).join('');
+    }
+
+    function renderScreenplay(sp) {
+        const div = document.getElementById('scenesList');
+        if (!sp || !sp.scenes || sp.scenes.length === 0) { div.innerHTML = '<span style="color:#555">暂无场景</span>'; return; }
+        div.innerHTML = sp.scenes.map(s => `<div class="scene-card">
+            <div class="heading">${escapeHtml(s.heading || s.id || '?')}</div>
+            <div class="synopsis">${escapeHtml((s.synopsis || '').substring(0, 100))}${(s.synopsis || '').length > 100 ? '…' : ''}</div>
+        </div>`).join('');
+
+        if (sp.characters && sp.characters.length > 0) {
+            const tbody = document.getElementById('charTableBody');
+            tbody.innerHTML = sp.characters.map(c => `<tr>
+                <td>${escapeHtml(c.name || c.id)}</td>
+                <td>-</td><td>-</td><td>-</td>
+            </tr>`).join('');
+        }
+    }
+
+    function renderSceneHeadings(headings) {
+        const div = document.getElementById('scenesList');
+        div.innerHTML = headings.map(h => `<div class="scene-card">
+            <div class="heading">${escapeHtml(h)}</div>
+        </div>`).join('');
+    }
+
+    // ---- Init ----
+    fetchStatus();
+    </script>
+</body>
+</html>

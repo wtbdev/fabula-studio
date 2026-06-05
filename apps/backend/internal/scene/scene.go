@@ -1,7 +1,12 @@
 // Package scene handles scene planning and context assembly for screenplay generation.
 package scene
 
-import "github.com/fabula-studio/backend/internal/graph"
+import (
+	"encoding/json"
+	"fmt"
+
+	"github.com/fabula-studio/backend/internal/graph"
+)
 
 // ScenePlan defines how a leaf node maps to screenplay scenes.
 type ScenePlan struct {
@@ -16,6 +21,30 @@ type ScenePlan struct {
 	OmitDetails   []string `json:"omit_details"`
 	Sequence      int      `json:"sequence"`
 	SummaryOnly   string   `json:"summary_only,omitempty"`
+}
+
+// UnmarshalJSON handles LLM quirks (e.g. omit_details as string instead of array).
+func (s *ScenePlan) UnmarshalJSON(data []byte) error {
+	type Alias ScenePlan
+	aux := &struct {
+		OmitDetails interface{} `json:"omit_details"`
+		*Alias
+	}{Alias: (*Alias)(s)}
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+	switch v := aux.OmitDetails.(type) {
+	case []interface{}:
+		s.OmitDetails = make([]string, 0, len(v))
+		for _, item := range v {
+			s.OmitDetails = append(s.OmitDetails, fmt.Sprintf("%v", item))
+		}
+	case string:
+		if v != "" {
+			s.OmitDetails = []string{v}
+		}
+	}
+	return nil
 }
 
 // CharacterInfo is a lightweight character reference for the context package.

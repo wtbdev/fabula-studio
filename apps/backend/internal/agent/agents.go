@@ -27,7 +27,6 @@ func NewNovelAgent(modelName, apiKey, baseURL string) *NovelAgent {
 	m := openai.New(modelName, opts...)
 
 	genConfig := model.GenerationConfig{
-		MaxTokens:   intPtr(4096),
 		Temperature: floatPtr(0.4),
 		Stream:      false,
 	}
@@ -52,7 +51,6 @@ func NewNovelAgent(modelName, apiKey, baseURL string) *NovelAgent {
 	return &NovelAgent{Analyzer: analyzer, Writer: writer}
 }
 
-func intPtr(i int) *int    { return &i }
 func floatPtr(f float64) *float64 { return &f }
 
 // -- Agent descriptions --

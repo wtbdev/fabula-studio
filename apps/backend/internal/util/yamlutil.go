@@ -1,9 +1,20 @@
 package util
 
 import (
+	"fmt"
 	"strings"
 )
 
+
+// PrepareYAML strips markdown wrappers and rejects empty model outputs before
+// callers unmarshal.
+func PrepareYAML(raw, label string) (string, error) {
+	prepared := RepairYAML(raw)
+	if strings.TrimSpace(prepared) == "" {
+		return "", fmt.Errorf("%s: empty model response", label)
+	}
+	return prepared, nil
+}
 // RepairYAML attempts to fix common YAML formatting issues from LLM output.
 func RepairYAML(raw string) string {
 	raw = strings.TrimSpace(raw)

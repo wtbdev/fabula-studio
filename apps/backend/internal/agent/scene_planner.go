@@ -65,7 +65,6 @@ func NewScenePlannerAgent(modelName, apiKey, baseURL string) *ScenePlannerAgent 
 	}
 	m := openai.New(modelName, opts...)
 	genConfig := model.GenerationConfig{
-		MaxTokens:   intPtr(4096),
 		Temperature: floatPtr(0.3),
 	}
 
@@ -105,11 +104,60 @@ func (a *ScenePlannerAgent) PlanScenes(ctx context.Context, leaves []*tree.Story
 		return nil, err
 	}
 
-	raw = util.RepairJSON(raw)
+	raw, err = util.PrepareJSON(raw, "scene planner output")
+	if err != nil {
+		return nil, err
+	}
+	raw = normalizeScenePlansJSON(raw)
 
 	var plans []*scene.ScenePlan
 	if err := json.Unmarshal([]byte(raw), &plans); err != nil {
-		return nil, fmt.Errorf("failed to parse scene plans JSON: %w\nraw: %s", err, raw)
+		// LLM may return { "plan_001": {...}, "plan_002": {...} } instead of [...]
+		var planMap map[string]*scene.ScenePlan
+		if err2 := json.Unmarshal([]byte(raw), &planMap); err2 != nil {
+			return nil, fmt.Errorf("failed to parse scene plans JSON: %w\nraw: %s", err, raw)
+		}
+		plans = make([]*scene.ScenePlan, 0, len(planMap))
+		for _, p := range planMap {
+			plans = append(plans, p)
+		}
 	}
 	return plans, nil
+}
+
+// normalizeScenePlansJSON pre-processes LLM output to fix common JSON quirks.
+func normalizeScenePlansJSON(raw string) string {
+	var data interface{}
+	if err := json.Unmarshal([]byte(raw), &data); err != nil {
+		return raw
+	}
+	normalizeValue(data)
+	out, err := json.Marshal(data)
+	if err != nil {
+		return raw
+	}
+	return string(out)
+}
+
+func normalizeValue(v interface{}) {
+	switch val := v.(type) {
+	case map[string]interface{}:
+		for k, v := range val {
+			if k == "omit_details" {
+				if s, ok := v.(string); ok {
+					if s == "" {
+						val[k] = []interface{}{}
+					} else {
+						val[k] = []interface{}{s}
+					}
+				}
+			} else {
+				normalizeValue(v)
+			}
+		}
+	case []interface{}:
+		for _, item := range val {
+			normalizeValue(item)
+		}
+	}
 }

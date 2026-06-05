@@ -72,7 +72,6 @@ func NewNodeAnalyzerAgent(modelName, apiKey, baseURL string) *NodeAnalyzerAgent 
 	m := openai.New(modelName, opts...)
 
 	genConfig := model.GenerationConfig{
-		MaxTokens:   intPtr(4096),
 		Temperature: floatPtr(0.3),
 	}
 
@@ -96,7 +95,10 @@ func (a *NodeAnalyzerAgent) Analyze(ctx context.Context, node *tree.StoryNode, l
 	if err != nil {
 		return nil, err
 	}
-	raw = util.RepairJSON(raw)
+	raw, err = util.PrepareJSON(raw, "node analysis output")
+	if err != nil {
+		return nil, err
+	}
 
 	var result NodeAnalysisResult
 	if err := json.Unmarshal([]byte(raw), &result); err != nil {
