@@ -9,8 +9,10 @@ import (
 	"trpc.group/trpc-go/trpc-agent-go/agent/llmagent"
 	"trpc.group/trpc-go/trpc-agent-go/model"
 	"trpc.group/trpc-go/trpc-agent-go/model/openai"
+	"trpc.group/trpc-go/trpc-agent-go/tool"
 
 	"github.com/fabula-studio/backend/internal/schema"
+	fabulatool "github.com/fabula-studio/backend/internal/tool"
 )
 
 // ChiefEditorAgent reviews and revises the complete screenplay.
@@ -71,10 +73,10 @@ func NewChiefEditorAgent(modelName, apiKey, baseURL string) *ChiefEditorAgent {
 		llmagent.WithDescription(chiefEditorDesc),
 		llmagent.WithInstruction(chiefEditorPrompt),
 		llmagent.WithGenerationConfig(genConfig),
+		llmagent.WithTools([]tool.Tool{fabulatool.NewValidateOutputTool()}),
 	)
 	return &ChiefEditorAgent{agent: agt}
 }
-
 // editorOutput is the JSON structure returned by the editor agent.
 type editorOutput struct {
 	ScreenplayRaw json.RawMessage `json:"screenplay"`
@@ -91,7 +93,7 @@ func (a *ChiefEditorAgent) ReviewAndRevise(ctx context.Context, sp *schema.Scree
 
 	prompt := fmt.Sprintf("Review and revise this screenplay:\n```yaml\n%s\n```", string(spYAML))
 
-	raw, err := RunAgent(ctx, a.agent, prompt)
+	raw, err := Run(ctx, a.agent, prompt)
 	if err != nil {
 		return nil, err
 	}

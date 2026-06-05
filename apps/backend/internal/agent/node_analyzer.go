@@ -8,8 +8,11 @@ import (
 	"trpc.group/trpc-go/trpc-agent-go/agent/llmagent"
 	"trpc.group/trpc-go/trpc-agent-go/model"
 	"trpc.group/trpc-go/trpc-agent-go/model/openai"
+	"trpc.group/trpc-go/trpc-agent-go/tool"
 
+	fabulatool "github.com/fabula-studio/backend/internal/tool"
 	"github.com/fabula-studio/backend/internal/tree"
+	"github.com/fabula-studio/backend/internal/util"
 )
 
 // NodeAnalyzerAgent analyzes individual story nodes.
@@ -81,6 +84,7 @@ func NewNodeAnalyzerAgent(modelName, apiKey, baseURL string) *NodeAnalyzerAgent 
 		llmagent.WithDescription(nodeAnalyzerDesc),
 		llmagent.WithInstruction(nodeAnalyzerPrompt),
 		llmagent.WithGenerationConfig(genConfig),
+		llmagent.WithTools([]tool.Tool{fabulatool.NewValidateOutputTool()}),
 	)
 	return &NodeAnalyzerAgent{agent: agt}
 }
@@ -92,12 +96,11 @@ func (a *NodeAnalyzerAgent) Analyze(ctx context.Context, node *tree.StoryNode, l
 		prompt = fmt.Sprintf("Context: The previous fragment ended with: %q\n\n%s", leftNeighborSummary, prompt)
 	}
 
-	raw, err := RunAgent(ctx, a.agent, prompt)
+	raw, err := Run(ctx, a.agent, prompt)
 	if err != nil {
 		return nil, err
 	}
-
-	raw = repairJSON(raw)
+	raw = util.RepairJSON(raw)
 
 	var result NodeAnalysisResult
 	if err := json.Unmarshal([]byte(raw), &result); err != nil {

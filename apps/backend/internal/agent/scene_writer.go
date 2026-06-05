@@ -12,6 +12,7 @@ import (
 
 	"github.com/fabula-studio/backend/internal/schema"
 	"github.com/fabula-studio/backend/internal/scene"
+	"github.com/fabula-studio/backend/internal/util"
 )
 
 // SceneWriterAgent generates a single YAML scene from a context package.
@@ -92,12 +93,12 @@ func (a *SceneWriterAgent) WriteScene(ctx context.Context, sceneCtx *scene.Scene
 
 	prompt := fmt.Sprintf("Generate the YAML scene for this context package:\n```json\n%s\n```", string(ctxJSON))
 
-	raw, err := RunAgent(ctx, a.agent, prompt)
+	raw, err := Run(ctx, a.agent, prompt)
 	if err != nil {
 		return nil, err
 	}
 
-	raw = repairYAML(raw)
+	raw = util.RepairYAML(raw)
 
 	var sc schema.Scene
 	if err := yaml.Unmarshal([]byte(raw), &sc); err != nil {

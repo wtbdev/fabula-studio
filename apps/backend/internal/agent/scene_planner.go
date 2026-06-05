@@ -8,9 +8,12 @@ import (
 	"trpc.group/trpc-go/trpc-agent-go/agent/llmagent"
 	"trpc.group/trpc-go/trpc-agent-go/model"
 	"trpc.group/trpc-go/trpc-agent-go/model/openai"
+	"trpc.group/trpc-go/trpc-agent-go/tool"
 
 	"github.com/fabula-studio/backend/internal/scene"
+	fabulatool "github.com/fabula-studio/backend/internal/tool"
 	"github.com/fabula-studio/backend/internal/tree"
+	"github.com/fabula-studio/backend/internal/util"
 )
 
 // ScenePlannerAgent decides how leaf nodes map to screenplay scenes.
@@ -72,10 +75,10 @@ func NewScenePlannerAgent(modelName, apiKey, baseURL string) *ScenePlannerAgent 
 		llmagent.WithDescription(scenePlannerDesc),
 		llmagent.WithInstruction(scenePlannerPrompt),
 		llmagent.WithGenerationConfig(genConfig),
+		llmagent.WithTools([]tool.Tool{fabulatool.NewValidateOutputTool()}),
 	)
 	return &ScenePlannerAgent{agent: agt}
 }
-
 // PlanScenes generates scene plans for a set of leaf nodes.
 func (a *ScenePlannerAgent) PlanScenes(ctx context.Context, leaves []*tree.StoryNode) ([]*scene.ScenePlan, error) {
 	// Build a compact representation of leaves for the prompt
@@ -99,12 +102,12 @@ func (a *ScenePlannerAgent) PlanScenes(ctx context.Context, leaves []*tree.Story
 	infosJSON, _ := json.Marshal(infos)
 	prompt := fmt.Sprintf("Plan scenes for these leaf nodes:\n```json\n%s\n```", string(infosJSON))
 
-	raw, err := RunAgent(ctx, a.agent, prompt)
+	raw, err := Run(ctx, a.agent, prompt)
 	if err != nil {
 		return nil, err
 	}
 
-	raw = repairJSON(raw)
+	raw = util.RepairJSON(raw)
 
 	var plans []*scene.ScenePlan
 	if err := json.Unmarshal([]byte(raw), &plans); err != nil {
