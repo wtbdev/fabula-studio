@@ -76,7 +76,7 @@ func NewGraphAnalyzerAgent(modelName, apiKey, baseURL string) *GraphAnalyzerAgen
 	}
 	m := openai.New(modelName, opts...)
 	genConfig := model.GenerationConfig{
-		MaxTokens:   intPtr(2000),
+		MaxTokens:   intPtr(4096),
 		Temperature: floatPtr(0.3),
 	}
 
@@ -103,6 +103,8 @@ func (a *GraphAnalyzerAgent) AnalyzeUpdate(ctx context.Context, nodeText string,
 	if err != nil {
 		return nil, err
 	}
+
+	raw = repairJSON(raw)
 
 	var result graph.GraphUpdateResult
 	if err := json.Unmarshal([]byte(raw), &result); err != nil {

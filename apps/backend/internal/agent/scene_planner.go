@@ -63,7 +63,7 @@ func NewScenePlannerAgent(modelName, apiKey, baseURL string) *ScenePlannerAgent 
 	}
 	m := openai.New(modelName, opts...)
 	genConfig := model.GenerationConfig{
-		MaxTokens:   intPtr(3000),
+		MaxTokens:   intPtr(4096),
 		Temperature: floatPtr(0.3),
 	}
 
@@ -103,6 +103,8 @@ func (a *ScenePlannerAgent) PlanScenes(ctx context.Context, leaves []*tree.Story
 	if err != nil {
 		return nil, err
 	}
+
+	raw = repairJSON(raw)
 
 	var plans []*scene.ScenePlan
 	if err := json.Unmarshal([]byte(raw), &plans); err != nil {

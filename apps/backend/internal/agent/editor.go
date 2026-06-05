@@ -62,7 +62,7 @@ func NewChiefEditorAgent(modelName, apiKey, baseURL string) *ChiefEditorAgent {
 	}
 	m := openai.New(modelName, opts...)
 	genConfig := model.GenerationConfig{
-		MaxTokens:   intPtr(8000),
+		MaxTokens:   intPtr(16384),
 		Temperature: floatPtr(0.4),
 	}
 

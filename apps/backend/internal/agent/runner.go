@@ -21,13 +21,21 @@ func RunAgent(ctx context.Context, agt *llmagent.LLMAgent, prompt string) (strin
 	}
 
 	var sb strings.Builder
+	evtCount := 0
 	for evt := range eventChan {
+		evtCount++
 		if evt.Error != nil {
+			fmt.Printf("[Agent] Error event: %s\n", evt.Error.Message)
 			return "", fmt.Errorf("agent error: %s", evt.Error.Message)
 		}
 		if len(evt.Response.Choices) > 0 {
-			sb.WriteString(evt.Response.Choices[0].Message.Content)
+			content := evt.Response.Choices[0].Message.Content
+			sb.WriteString(content)
 		}
 	}
-	return sb.String(), nil
+	result := sb.String()
+	if result == "" {
+		fmt.Printf("[Agent] Warning: empty response after %d events\n", evtCount)
+	}
+	return result, nil
 }
