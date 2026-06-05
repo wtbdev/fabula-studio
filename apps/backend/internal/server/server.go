@@ -12,35 +12,57 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/fabula-studio/backend/internal/config"
+	"github.com/fabula-studio/backend/internal/observability"
 	"github.com/fabula-studio/backend/internal/pipeline"
 	"github.com/fabula-studio/backend/internal/schema"
 )
 
 // Server holds dependencies and registered handlers.
 type Server struct {
-	config   config.Config
-	pipeline *pipeline.Pipeline
-	http     *http.Server
+	config    config.Config
+	pipeline  *pipeline.Pipeline
+	eventBus  *observability.EventBus
+	telemetry *observability.Telemetry
+	http      *http.Server
 }
 
 // New creates and returns a configured Server.
 func New(cfg config.Config) *Server {
-	p := pipeline.New(pipeline.DefaultConfig(), cfg.ModelName, cfg.APIKey, cfg.BaseURL)
+	// Initialize event bus
+	eventBus := observability.NewEventBus()
+
+	// Initialize telemetry
+	ctx := context.Background()
+	telemetry, err := observability.New(ctx, observability.Config{
+		ServiceName:  "fabula-studio",
+		OTLPEndpoint: cfg.OTLPEndpoint,
+		Environment:  cfg.LogLevel,
+	})
+	if err != nil {
+		log.Printf("Warning: Failed to initialize telemetry: %v", err)
+	}
+
+	p := pipeline.New(pipeline.DefaultConfig(), cfg.ModelName, cfg.APIKey, cfg.BaseURL, eventBus)
 
 	srv := &Server{
-		config:   cfg,
-		pipeline: p,
+		config:    cfg,
+		pipeline:  p,
+		eventBus:  eventBus,
+		telemetry: telemetry,
 	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/convert", srv.handleConvert)
 	mux.HandleFunc("/api/health", srv.handleHealth)
+	mux.HandleFunc("/api/events", eventBus.EventHandler())
+	mux.HandleFunc("/api/events/stream", eventBus.SSEHandler())
+	mux.HandleFunc("/api/trace", srv.handleTraceInfo)
 
 	srv.http = &http.Server{
 		Addr:         cfg.Addr,
 		Handler:      withCORS(withLogging(mux)),
 		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 600 * time.Second, // longer timeout for full pipeline
+		WriteTimeout: 600 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
 
@@ -51,13 +73,23 @@ func New(cfg config.Config) *Server {
 func (s *Server) Start() error {
 	log.Printf("fabula-studio backend starting on %s (model: %s)", s.config.Addr, s.config.ModelName)
 	log.Printf("API endpoints:")
-	log.Printf("  POST /api/convert   - Convert novel chapters to screenplay")
-	log.Printf("  GET  /api/health    - Health check")
+	log.Printf("  POST /api/convert         - Convert novel chapters to screenplay")
+	log.Printf("  GET  /api/health          - Health check")
+	log.Printf("  GET  /api/events          - Get recent events")
+	log.Printf("  GET  /api/events/stream   - SSE stream of real-time events")
+	log.Printf("  GET  /api/trace           - Trace information")
+	log.Printf("")
+	log.Printf("Observability:")
+	log.Printf("  Jaeger UI: http://localhost:16686")
+	log.Printf("  Grafana:   http://localhost:3000")
 	return s.http.ListenAndServe()
 }
 
 // Shutdown gracefully stops the server.
 func (s *Server) Shutdown(ctx context.Context) error {
+	if s.telemetry != nil {
+		s.telemetry.Shutdown(ctx)
+	}
 	return s.http.Shutdown(ctx)
 }
 
@@ -115,6 +147,15 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{
 		"status": "ok",
 		"time":   time.Now().Format(time.RFC3339),
+	})
+}
+
+// handleTraceInfo returns trace information.
+func (s *Server) handleTraceInfo(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"jaeger_ui": "http://localhost:16686",
+		"grafana":   "http://localhost:3000",
+		"otlp_endpoint": "localhost:4317",
 	})
 }
 
