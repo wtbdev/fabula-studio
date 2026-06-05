@@ -1,0 +1,30 @@
+# Go
+apps/backend/bin/
+*.exe
+*.test
+*.out
+*.prof
+
+# Node / Frontend
+node_modules/
+dist/
+.next/
+.cache/
+*.tsbuildinfo
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Build artifacts
+*.tmp
+*.log

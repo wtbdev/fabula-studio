@@ -1,0 +1,7 @@
+{
+  "name": "@fabula-studio/frontend",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Fabula Studio - AI-powered novel to screenplay conversion tool (frontend placeholder)",
+  "scripts": {}
+}
