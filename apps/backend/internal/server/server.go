@@ -23,6 +23,7 @@ type Server struct {
 	pipeline  *pipeline.Pipeline
 	eventBus  *observability.EventBus
 	telemetry *observability.Telemetry
+	agui      *AGUIServer
 	http      *http.Server
 }
 
@@ -36,19 +37,21 @@ func New(cfg config.Config) *Server {
 	telemetry, err := observability.New(ctx, observability.Config{
 		ServiceName:  "fabula-studio",
 		OTLPEndpoint: cfg.OTLPEndpoint,
-		Environment:  cfg.LogLevel,
 	})
 	if err != nil {
 		log.Printf("Warning: Failed to initialize telemetry: %v", err)
 	}
-
 	p := pipeline.New(pipeline.DefaultConfig(), cfg.ModelName, cfg.APIKey, cfg.BaseURL, eventBus)
+
+	// Initialize AG-UI server
+	agui := NewAGUIServer(cfg.ModelName, cfg.APIKey, cfg.BaseURL, eventBus)
 
 	srv := &Server{
 		config:    cfg,
 		pipeline:  p,
 		eventBus:  eventBus,
 		telemetry: telemetry,
+		agui:      agui,
 	}
 
 	mux := http.NewServeMux()
@@ -57,6 +60,9 @@ func New(cfg config.Config) *Server {
 	mux.HandleFunc("/api/events", eventBus.EventHandler())
 	mux.HandleFunc("/api/events/stream", eventBus.SSEHandler())
 	mux.HandleFunc("/api/trace", srv.handleTraceInfo)
+
+	// Register AG-UI routes
+	agui.Routes(mux)
 
 	srv.http = &http.Server{
 		Addr:         cfg.Addr,
@@ -79,6 +85,12 @@ func (s *Server) Start() error {
 	log.Printf("  GET  /api/events/stream   - SSE stream of real-time events")
 	log.Printf("  GET  /api/trace           - Trace information")
 	log.Printf("")
+	log.Printf("AG-UI Protocol:")
+	log.Printf("  GET  /api/sessions        - List sessions")
+	log.Printf("  POST /api/sessions        - Create session")
+	log.Printf("  POST /api/chat            - Non-streaming chat")
+	log.Printf("  POST /api/chat/stream     - SSE streaming chat")
+	log.Printf("")
 	log.Printf("Observability:")
 	log.Printf("  Jaeger UI: http://localhost:16686")
 	log.Printf("  Grafana:   http://localhost:3000")
@@ -88,7 +100,7 @@ func (s *Server) Start() error {
 // Shutdown gracefully stops the server.
 func (s *Server) Shutdown(ctx context.Context) error {
 	if s.telemetry != nil {
-		s.telemetry.Shutdown(ctx)
+		s.telemetry.Shutdown()
 	}
 	return s.http.Shutdown(ctx)
 }
