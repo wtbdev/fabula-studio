@@ -1,11 +1,11 @@
-package agent
+package util
 
 import (
 	"strings"
 )
 
-// repairYAML attempts to fix common YAML formatting issues from LLM output.
-func repairYAML(raw string) string {
+// RepairYAML attempts to fix common YAML formatting issues from LLM output.
+func RepairYAML(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return raw

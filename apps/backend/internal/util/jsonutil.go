@@ -1,12 +1,13 @@
-package agent
+// Package util provides shared utility functions for JSON/YAML repair.
+package util
 
 import (
 	"encoding/json"
 	"strings"
 )
 
-// repairJSON attempts to fix truncated JSON by closing open brackets/braces.
-func repairJSON(raw string) string {
+// RepairJSON attempts to fix truncated JSON by closing open brackets/braces.
+func RepairJSON(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return raw
