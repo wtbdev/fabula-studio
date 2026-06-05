@@ -3,6 +3,7 @@ package validator
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/fabula-studio/backend/internal/schema"
 )
@@ -61,30 +62,61 @@ func (v *Validator) validateSceneOrder(sp *schema.Screenplay, r *ValidationResul
 		}
 	}
 }
-
 // validateCharacterRefs ensures dialogue characters and characters_present reference valid character IDs/names.
+// Uses fuzzy matching: exact match first, then case-insensitive substring, then trimmed comparison.
 func (v *Validator) validateCharacterRefs(sp *schema.Screenplay, r *ValidationResult) {
 	charNames := make(map[string]bool)
 	charIDs := make(map[string]bool)
+	// Also build a normalized name map for fuzzy matching
+	normalizedNames := make(map[string]string) // normalized -> original
 	for _, ch := range sp.Characters {
 		charNames[ch.Name] = true
 		charIDs[ch.ID] = true
+		normalized := normalizeName(ch.Name)
+		if _, exists := normalizedNames[normalized]; !exists {
+			normalizedNames[normalized] = ch.Name
+		}
+	}
+
+	matchCharacter := func(ref string) bool {
+		// Exact match (by ID or name)
+		if charIDs[ref] || charNames[ref] {
+			return true
+		}
+		// Normalized match
+		refNorm := normalizeName(ref)
+		if _, ok := normalizedNames[refNorm]; ok {
+			return true
+		}
+		// Fuzzy: try substring match on original names
+		for origName := range charNames {
+			if strings.Contains(strings.ToLower(origName), strings.ToLower(ref)) ||
+				strings.Contains(strings.ToLower(ref), strings.ToLower(origName)) {
+				return true
+			}
+		}
+		return false
 	}
 
 	for _, sc := range sp.Scenes {
 		for _, cid := range sc.CharactersPresent {
-			if !charIDs[cid] && !charNames[cid] {
+			if !matchCharacter(cid) {
 				r.Errors = append(r.Errors, fmt.Sprintf("scene %q references unknown character %q", sc.ID, cid))
 			}
 		}
 		for _, elem := range sc.Content {
 			if elem.Type == schema.ElementDialogue && elem.Character != "" {
-				if !charNames[elem.Character] && !charIDs[elem.Character] {
+				if !matchCharacter(elem.Character) {
 					r.Warnings = append(r.Warnings, fmt.Sprintf("scene %q dialogue references unknown character %q", sc.ID, elem.Character))
 				}
 			}
 		}
 	}
+}
+
+// normalizeName trims and lowercases a name for fuzzy comparison.
+func normalizeName(name string) string {
+	return strings.TrimSpace(strings.ToLower(name))
 }
 
 // validateNonEmpty checks that scenes have actual content.
