@@ -8,9 +8,7 @@ import (
 	"trpc.group/trpc-go/trpc-agent-go/agent/llmagent"
 	"trpc.group/trpc-go/trpc-agent-go/model"
 	"trpc.group/trpc-go/trpc-agent-go/model/openai"
-	"trpc.group/trpc-go/trpc-agent-go/tool"
 
-	fabulatool "github.com/fabula-studio/backend/internal/tool"
 	"github.com/fabula-studio/backend/internal/tree"
 	"github.com/fabula-studio/backend/internal/util"
 )
@@ -84,7 +82,6 @@ func NewNodeAnalyzerAgent(modelName, apiKey, baseURL string) *NodeAnalyzerAgent 
 		llmagent.WithDescription(nodeAnalyzerDesc),
 		llmagent.WithInstruction(nodeAnalyzerPrompt),
 		llmagent.WithGenerationConfig(genConfig),
-		llmagent.WithTools([]tool.Tool{fabulatool.NewValidateOutputTool()}),
 	)
 	return &NodeAnalyzerAgent{agent: agt}
 }

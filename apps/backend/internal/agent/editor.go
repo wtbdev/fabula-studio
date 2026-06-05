@@ -9,10 +9,8 @@ import (
 	"trpc.group/trpc-go/trpc-agent-go/agent/llmagent"
 	"trpc.group/trpc-go/trpc-agent-go/model"
 	"trpc.group/trpc-go/trpc-agent-go/model/openai"
-	"trpc.group/trpc-go/trpc-agent-go/tool"
 
 	"github.com/fabula-studio/backend/internal/schema"
-	fabulatool "github.com/fabula-studio/backend/internal/tool"
 )
 
 // ChiefEditorAgent reviews and revises the complete screenplay.
@@ -73,7 +71,6 @@ func NewChiefEditorAgent(modelName, apiKey, baseURL string) *ChiefEditorAgent {
 		llmagent.WithDescription(chiefEditorDesc),
 		llmagent.WithInstruction(chiefEditorPrompt),
 		llmagent.WithGenerationConfig(genConfig),
-		llmagent.WithTools([]tool.Tool{fabulatool.NewValidateOutputTool()}),
 	)
 	return &ChiefEditorAgent{agent: agt}
 }

@@ -62,7 +62,7 @@ func NewGraphAnalyzerAgent(modelName, apiKey, baseURL string) *GraphAnalyzerAgen
 	// Combine validation tool with graph tools
 	graphTools := fabulatool.NewGraphTools()
 	allTools := make([]tool.Tool, 0, len(graphTools)+1)
-	allTools = append(allTools, fabulatool.NewValidateOutputTool())
+
 	allTools = append(allTools, graphTools...)
 
 	agt := llmagent.New("graph-analyzer",

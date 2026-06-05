@@ -8,10 +8,8 @@ import (
 	"trpc.group/trpc-go/trpc-agent-go/agent/llmagent"
 	"trpc.group/trpc-go/trpc-agent-go/model"
 	"trpc.group/trpc-go/trpc-agent-go/model/openai"
-	"trpc.group/trpc-go/trpc-agent-go/tool"
 
 	"github.com/fabula-studio/backend/internal/scene"
-	fabulatool "github.com/fabula-studio/backend/internal/tool"
 	"github.com/fabula-studio/backend/internal/tree"
 	"github.com/fabula-studio/backend/internal/util"
 )
@@ -75,7 +73,6 @@ func NewScenePlannerAgent(modelName, apiKey, baseURL string) *ScenePlannerAgent 
 		llmagent.WithDescription(scenePlannerDesc),
 		llmagent.WithInstruction(scenePlannerPrompt),
 		llmagent.WithGenerationConfig(genConfig),
-		llmagent.WithTools([]tool.Tool{fabulatool.NewValidateOutputTool()}),
 	)
 	return &ScenePlannerAgent{agent: agt}
 }
