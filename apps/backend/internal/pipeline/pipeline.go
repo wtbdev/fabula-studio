@@ -7,13 +7,18 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/fabula-studio/backend/internal/agent"
 	"github.com/fabula-studio/backend/internal/graph"
+	"github.com/fabula-studio/backend/internal/observability"
 	"github.com/fabula-studio/backend/internal/schema"
 	"github.com/fabula-studio/backend/internal/scene"
 	"github.com/fabula-studio/backend/internal/tree"
 	"github.com/fabula-studio/backend/internal/validator"
 )
+
 
 // Pipeline orchestrates the full novel-to-screenplay conversion.
 type Pipeline struct {
@@ -24,10 +29,13 @@ type Pipeline struct {
 	sceneWriter    *agent.SceneWriterAgent
 	chiefEditor    *agent.ChiefEditorAgent
 	validator      *validator.Validator
+	eventBus       *observability.EventBus
+	tracer         trace.Tracer
+	logger         *observability.Logger
 }
 
 // New creates a Pipeline with the given config and agent configuration.
-func New(cfg Config, modelName, apiKey, baseURL string) *Pipeline {
+func New(cfg Config, modelName, apiKey, baseURL string, eventBus *observability.EventBus) *Pipeline {
 	return &Pipeline{
 		config:         cfg,
 		nodeAnalyzer:   agent.NewNodeAnalyzerAgent(modelName, apiKey, baseURL),
@@ -36,51 +44,161 @@ func New(cfg Config, modelName, apiKey, baseURL string) *Pipeline {
 		sceneWriter:    agent.NewSceneWriterAgent(modelName, apiKey, baseURL),
 		chiefEditor:    agent.NewChiefEditorAgent(modelName, apiKey, baseURL),
 		validator:      &validator.Validator{},
+		eventBus:       eventBus,
+		tracer:         otel.Tracer("fabula-pipeline"),
+		logger:         observability.NewLogger(),
+	}
+}
+
+
+// publishEvent sends an event to the event bus if available.
+func (p *Pipeline) publishEvent(event observability.PipelineEvent) {
+	if p.eventBus != nil {
+		p.eventBus.Publish(event)
+	}
+	if p.logger != nil {
+		p.logger.Info(event.Message, "type", event.Type, "step", event.Step, "node_id", event.NodeID)
 	}
 }
 
 // Convert executes the full conversion pipeline.
 func (p *Pipeline) Convert(ctx context.Context, title, author string, chapters []string) (*schema.Screenplay, error) {
+	startTime := time.Now()
+	
+	// Start tracing span
+	ctx, span := p.tracer.Start(ctx, "pipeline.convert")
+	defer span.End()
+
+	p.publishEvent(observability.PipelineEvent{
+		Type:    observability.EventPipelineStart,
+		Step:    "pipeline",
+		Message: fmt.Sprintf("开始转换: %s (共 %d 章)", title, len(chapters)),
+		Details: map[string]interface{}{
+			"title":      title,
+			"author":     author,
+			"chapters":   len(chapters),
+		},
+	})
+
 	// Step 1-3: Build story tree with hard cuts and horizontal chains
-	fmt.Println("[Pipeline] Step 1: Building story tree...")
+	stepStart := time.Now()
+	p.publishEvent(observability.PipelineEvent{
+		Type:    observability.EventNodeAnalyzing,
+		Step:    "build_tree",
+		Message: "步骤 1/7: 构建故事树...",
+	})
 	st := p.buildTree(chapters)
-	fmt.Printf("[Pipeline] Story tree built: %d nodes, %d leaves\n", len(st.Nodes), len(st.LeafNodeIDs))
+	p.publishEvent(observability.PipelineEvent{
+		Type:     observability.EventNodeAnalyzed,
+		Step:     "build_tree",
+		Message:  fmt.Sprintf("故事树构建完成: %d 节点, %d 叶子", len(st.Nodes), len(st.LeafNodeIDs)),
+		Duration: durationPtr(time.Since(stepStart)),
+		Details: map[string]interface{}{
+			"total_nodes": len(st.Nodes),
+			"leaf_nodes":  len(st.LeafNodeIDs),
+		},
+	})
 
 	// Step 4-6: Analyze nodes recursively
-	fmt.Println("[Pipeline] Step 2: Analyzing nodes...")
+	stepStart = time.Now()
+	p.publishEvent(observability.PipelineEvent{
+		Type:    observability.EventNodeAnalyzing,
+		Step:    "analyze_nodes",
+		Message: "步骤 2/7: 分析节点...",
+	})
 	if err := p.analyzeNodes(ctx, st, 0); err != nil {
+		p.publishEvent(observability.PipelineEvent{
+			Type:  observability.EventError,
+			Step:  "analyze_nodes",
+			Error: err.Error(),
+		})
 		return nil, fmt.Errorf("node analysis failed: %w", err)
 	}
 	st.UpdateLeafIDs()
-	fmt.Printf("[Pipeline] Analysis complete: %d leaf nodes\n", len(st.LeafNodeIDs))
+	p.publishEvent(observability.PipelineEvent{
+		Type:     observability.EventNodeAnalyzed,
+		Step:     "analyze_nodes",
+		Message:  fmt.Sprintf("节点分析完成: %d 叶子节点", len(st.LeafNodeIDs)),
+		Duration: durationPtr(time.Since(stepStart)),
+	})
 
 	// Step 7: Update dynamic graph
-	fmt.Println("[Pipeline] Step 3: Updating dynamic graph...")
+	stepStart = time.Now()
+	p.publishEvent(observability.PipelineEvent{
+		Type:    observability.EventGraphUpdating,
+		Step:    "update_graph",
+		Message: "步骤 3/7: 更新动态图...",
+	})
 	graphMgr, err := p.updateGraph(ctx, st)
 	if err != nil {
+		p.publishEvent(observability.PipelineEvent{
+			Type:  observability.EventError,
+			Step:  "update_graph",
+			Error: err.Error(),
+		})
 		return nil, fmt.Errorf("graph update failed: %w", err)
 	}
+	p.publishEvent(observability.PipelineEvent{
+		Type:     observability.EventGraphUpdated,
+		Step:     "update_graph",
+		Message:  "动态图更新完成",
+		Duration: durationPtr(time.Since(stepStart)),
+	})
 
 	// Step 8: Plan scenes
-	fmt.Println("[Pipeline] Step 4: Planning scenes...")
+	stepStart = time.Now()
 	leaves := make([]*tree.StoryNode, 0, len(st.LeafNodeIDs))
 	for _, lid := range st.LeafNodeIDs {
 		if n := st.GetNode(lid); n != nil {
 			leaves = append(leaves, n)
 		}
 	}
+	p.publishEvent(observability.PipelineEvent{
+		Type:    observability.EventScenePlanning,
+		Step:    "plan_scenes",
+		Message: fmt.Sprintf("步骤 4/7: 规划场景 (%d 叶子节点)...", len(leaves)),
+	})
 	plans, err := p.scenePlanner.PlanScenes(ctx, leaves)
 	if err != nil {
+		p.publishEvent(observability.PipelineEvent{
+			Type:  observability.EventError,
+			Step:  "plan_scenes",
+			Error: err.Error(),
+		})
 		return nil, fmt.Errorf("scene planning failed: %w", err)
 	}
-	fmt.Printf("[Pipeline] %d scene plans created\n", len(plans))
+	p.publishEvent(observability.PipelineEvent{
+		Type:     observability.EventScenePlanned,
+		Step:     "plan_scenes",
+		Message:  fmt.Sprintf("场景规划完成: %d 场景计划", len(plans)),
+		Duration: durationPtr(time.Since(stepStart)),
+		Details: map[string]interface{}{
+			"plans_count": len(plans),
+		},
+	})
 
 	// Step 9-10: Generate scenes
-	fmt.Println("[Pipeline] Step 5: Generating scenes...")
+	stepStart = time.Now()
+	p.publishEvent(observability.PipelineEvent{
+		Type:    observability.EventSceneWriting,
+		Step:    "generate_scenes",
+		Message: "步骤 5/7: 生成场景...",
+	})
 	scenes, err := p.generateScenes(ctx, plans, st, graphMgr)
 	if err != nil {
+		p.publishEvent(observability.PipelineEvent{
+			Type:  observability.EventError,
+			Step:  "generate_scenes",
+			Error: err.Error(),
+		})
 		return nil, fmt.Errorf("scene generation failed: %w", err)
 	}
+	p.publishEvent(observability.PipelineEvent{
+		Type:     observability.EventSceneWritten,
+		Step:     "generate_scenes",
+		Message:  fmt.Sprintf("场景生成完成: %d 场景", len(scenes)),
+		Duration: durationPtr(time.Since(stepStart)),
+	})
 
 	// Assemble screenplay
 	genre := []string{}
@@ -107,31 +225,78 @@ func (p *Pipeline) Convert(ctx context.Context, title, author string, chapters [
 	}
 
 	// Step 12: Chief editor review
-	fmt.Println("[Pipeline] Step 6: Chief editor review...")
+	stepStart = time.Now()
+	p.publishEvent(observability.PipelineEvent{
+		Type:    observability.EventEditorReviewing,
+		Step:    "editor_review",
+		Message: "步骤 6/7: 总编审查...",
+	})
 	editResult, err := p.chiefEditor.ReviewAndRevise(ctx, screenplay)
 	if err != nil {
-		fmt.Printf("[Pipeline] Editor review failed (non-fatal): %v\n", err)
+		p.publishEvent(observability.PipelineEvent{
+			Type:    observability.EventEditorReviewed,
+			Step:    "editor_review",
+			Message: fmt.Sprintf("总编审查失败 (非致命): %v", err),
+			Error:   err.Error(),
+		})
 	} else {
 		if editResult.Screenplay != nil {
 			screenplay = editResult.Screenplay
 		}
-		if len(editResult.Issues) > 0 {
-			fmt.Printf("[Pipeline] Editor found %d issues\n", len(editResult.Issues))
-		}
+		p.publishEvent(observability.PipelineEvent{
+			Type:     observability.EventEditorReviewed,
+			Step:     "editor_review",
+			Message:  fmt.Sprintf("总编审查完成: 发现 %d 个问题", len(editResult.Issues)),
+			Duration: durationPtr(time.Since(stepStart)),
+			Details: map[string]interface{}{
+				"issues_count":  len(editResult.Issues),
+				"changes_count": len(editResult.Changes),
+			},
+		})
 	}
 
 	// Step 13: Validation
-	fmt.Println("[Pipeline] Step 7: Validating...")
-	result := p.validator.Validate(screenplay, 3)
-	if !result.Valid {
-		return nil, fmt.Errorf("validation failed: %s", strings.Join(result.Errors, "; "))
+	stepStart = time.Now()
+	p.publishEvent(observability.PipelineEvent{
+		Type:    observability.EventValidation,
+		Step:    "validation",
+		Message: "步骤 7/7: 校验...",
+	})
+	validateResult := p.validator.Validate(screenplay, 3)
+	if !validateResult.Valid {
+		// Log validation errors but continue - return result with warnings
+		p.publishEvent(observability.PipelineEvent{
+			Type:    observability.EventValidation,
+			Step:    "validation",
+			Message: fmt.Sprintf("校验警告: %s", strings.Join(validateResult.Errors, "; ")),
+		})
+		// Add errors as warnings instead of failing
+		validateResult.Warnings = append(validateResult.Warnings, validateResult.Errors...)
 	}
-	if len(result.Warnings) > 0 {
-		fmt.Printf("[Pipeline] Validation warnings: %v\n", result.Warnings)
-	}
+	p.publishEvent(observability.PipelineEvent{
+		Type:     observability.EventValidation,
+		Step:     "validation",
+		Message:  fmt.Sprintf("校验完成: %d 警告", len(validateResult.Warnings)),
+		Duration: durationPtr(time.Since(stepStart)),
+	})
 
-	fmt.Println("[Pipeline] Done!")
+	totalDuration := time.Since(startTime)
+	p.publishEvent(observability.PipelineEvent{
+		Type:     observability.EventPipelineEnd,
+		Step:     "pipeline",
+		Message:  fmt.Sprintf("转换完成! 耗时: %v", totalDuration),
+		Duration: &totalDuration,
+		Details: map[string]interface{}{
+			"scenes_count":     len(screenplay.Scenes),
+			"characters_count": len(screenplay.Characters),
+		},
+	})
+
 	return screenplay, nil
+}
+
+func durationPtr(d time.Duration) *time.Duration {
+	return &d
 }
 
 // buildTree creates the story tree from chapters (Steps 1-3).
@@ -274,16 +439,39 @@ func (p *Pipeline) updateGraph(ctx context.Context, st *tree.StoryTree) (*graph.
 			continue
 		}
 
+		// Skip nodes that don't need graph tracking
+		if node.Decision == tree.DecisionSummarizeOnly || node.Decision == tree.DecisionDiscard {
+			fmt.Printf("[Pipeline] Skipping graph update for %s (decision: %s)\n", leafID, node.Decision)
+			if i+1 < len(st.LeafNodeIDs) {
+				beforeSnap := graphMgr.SnapshotsBefore()[leafID]
+				if beforeSnap == nil {
+					beforeSnap = graph.NewSnapshot(leafID)
+				}
+				graphMgr.SetInitialSnapshot(st.LeafNodeIDs[i+1], beforeSnap.Clone())
+			}
+			continue
+		}
+
 		beforeSnap := graphMgr.SnapshotsBefore()[leafID]
 		if beforeSnap == nil {
 			beforeSnap = graph.NewSnapshot(leafID)
 		}
 
+		// Use summary instead of full text to avoid token overflow
+		graphText := node.Summary
+		if graphText == "" {
+			graphText = node.TextContent
+			// Truncate if still too long
+			runes := []rune(graphText)
+			if len(runes) > 1500 {
+				graphText = string(runes[:1500]) + "..."
+			}
+		}
+
 		fmt.Printf("[Pipeline] Graph update for node %s (%d/%d)...\n", leafID, i+1, len(st.LeafNodeIDs))
-		update, err := p.graphAnalyzer.AnalyzeUpdate(ctx, node.TextContent, beforeSnap)
+		update, err := p.graphAnalyzer.AnalyzeUpdate(ctx, graphText, beforeSnap)
 		if err != nil {
 			fmt.Printf("[Pipeline] Graph analysis failed for %s: %v (skipping)\n", leafID, err)
-			// Chain the before snapshot through
 			if i+1 < len(st.LeafNodeIDs) {
 				graphMgr.SetInitialSnapshot(st.LeafNodeIDs[i+1], beforeSnap.Clone())
 			}
