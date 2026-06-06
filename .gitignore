@@ -28,3 +28,7 @@ dist/
 # Build artifacts
 *.tmp
 *.log
+
+# Codex && AI
+.codex/
+.agents/
