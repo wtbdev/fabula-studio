@@ -23,11 +23,13 @@ type ScenePlan struct {
 	SummaryOnly   string   `json:"summary_only,omitempty"`
 }
 
-// UnmarshalJSON handles LLM quirks (e.g. omit_details as string instead of array).
+// UnmarshalJSON handles LLM quirks (e.g. omit_details as string instead of array,
+// summary_only as a boolean instead of summary text).
 func (s *ScenePlan) UnmarshalJSON(data []byte) error {
 	type Alias ScenePlan
 	aux := &struct {
 		OmitDetails interface{} `json:"omit_details"`
+		SummaryOnly interface{} `json:"summary_only"`
 		*Alias
 	}{Alias: (*Alias)(s)}
 	if err := json.Unmarshal(data, aux); err != nil {
@@ -42,6 +44,18 @@ func (s *ScenePlan) UnmarshalJSON(data []byte) error {
 	case string:
 		if v != "" {
 			s.OmitDetails = []string{v}
+		}
+	}
+	switch v := aux.SummaryOnly.(type) {
+	case string:
+		s.SummaryOnly = v
+	case bool:
+		if !v {
+			s.SummaryOnly = ""
+		}
+	default:
+		if v != nil {
+			s.SummaryOnly = fmt.Sprintf("%v", v)
 		}
 	}
 	return nil
@@ -67,16 +81,16 @@ type RelationInfo struct {
 // SceneContext is the bounded context package given to the scene writing agent.
 // It contains only information relevant to one scene — no future spoilers.
 type SceneContext struct {
-	ScenePlan     *ScenePlan      `json:"scene_plan"`
-	SourceText    string          `json:"source_text"`
-	SourceSummary string          `json:"source_summary"`
-	DramaticGoal  string          `json:"dramatic_goal"`
-	Characters    []CharacterInfo `json:"characters"`
-	Relations     []RelationInfo  `json:"relations"`
-	KnownFacts    []string        `json:"known_facts"`
-	PreviousEvents []string       `json:"previous_events"`
-	Unresolved    []string        `json:"unresolved"`
-	ForbiddenInfo []string        `json:"forbidden_info"`
+	ScenePlan      *ScenePlan      `json:"scene_plan"`
+	SourceText     string          `json:"source_text"`
+	SourceSummary  string          `json:"source_summary"`
+	DramaticGoal   string          `json:"dramatic_goal"`
+	Characters     []CharacterInfo `json:"characters"`
+	Relations      []RelationInfo  `json:"relations"`
+	KnownFacts     []string        `json:"known_facts"`
+	PreviousEvents []string        `json:"previous_events"`
+	Unresolved     []string        `json:"unresolved"`
+	ForbiddenInfo  []string        `json:"forbidden_info"`
 }
 
 // ContextBuilder assembles SceneContext packages from scene plans and the dynamic graph.

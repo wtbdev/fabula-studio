@@ -16,10 +16,19 @@ func NewSplitter(maxChunkSize int) *Splitter {
 	return &Splitter{maxChunkSize: maxChunkSize}
 }
 
+const rootNodeID = "node_000"
+
 // SplitChapters performs the initial hard-cut of chapters into first-layer nodes.
 // It preserves chapter boundaries and tries to split at paragraph boundaries.
 func (s *Splitter) SplitChapters(chapters []string) *StoryTree {
 	tree := NewTree()
+	root := &StoryNode{
+		ID:    rootNodeID,
+		Level: -1,
+	}
+	tree.AddNode(root)
+	tree.RootNodeID = rootNodeID
+
 	nodeSeq := 0
 	var topLevelIDs []string
 
@@ -32,6 +41,7 @@ func (s *Splitter) SplitChapters(chapters []string) *StoryTree {
 			nodeID := fmt.Sprintf("node_%03d", nodeSeq)
 			node := &StoryNode{
 				ID:            nodeID,
+				ParentID:      rootNodeID,
 				Level:         0,
 				TextContent:   chunk,
 				SourceChapter: chIdx,
@@ -48,22 +58,12 @@ func (s *Splitter) SplitChapters(chapters []string) *StoryTree {
 		}
 	}
 
-
-	// Build a synthetic root that holds all top-level nodes as children.
-	nodeSeq++
-	rootID := fmt.Sprintf("node_%03d", nodeSeq)
-	root := &StoryNode{
-		ID:          rootID,
-		Level:       -1,
-		ChildrenIDs: topLevelIDs,
-	}
+	root.ChildrenIDs = topLevelIDs
 	for _, nid := range topLevelIDs {
 		if n := tree.GetNode(nid); n != nil {
-			n.ParentID = rootID
+			n.ParentID = rootNodeID
 		}
 	}
-	tree.AddNode(root)
-	tree.RootNodeID = rootID
 
 	tree.UpdateLeafIDs()
 	return tree
