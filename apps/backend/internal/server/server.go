@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"gopkg.in/yaml.v3"
 
 	"github.com/fabula-studio/backend/internal/config"
@@ -94,7 +95,7 @@ func New(cfg config.Config) *Server {
 
 	srv.http = &http.Server{
 		Addr:         cfg.Addr,
-		Handler:      withCORS(withLogging(mux)),
+		Handler:      otelhttp.NewHandler(withCORS(withLogging(mux)), "http.server"),
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 600 * time.Second,
 		IdleTimeout:  60 * time.Second,
