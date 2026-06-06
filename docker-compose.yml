@@ -4,11 +4,11 @@ services:
     image: jaegertracing/all-in-one:1.53
     container_name: fabula-jaeger
     ports:
-      - "16686:16686"  # Jaeger UI
       - "4317:4317"    # OTLP gRPC
       - "4318:4318"    # OTLP HTTP
     environment:
       - COLLECTOR_OTLP_ENABLED=true
+      - QUERY_BASE_PATH=/jaeger
     restart: unless-stopped
 
   # PostgreSQL
@@ -33,21 +33,25 @@ services:
   # Backend
   backend:
     image: fabula-backend:latest
+    build:
+      context: .
+      dockerfile: apps/backend/Dockerfile
     container_name: fabula-backend
-    network_mode: host
     environment:
-      - LISTEN_ADDR=:8080
+      - LISTEN_ADDR=0.0.0.0:8080
       - LLM_MODEL=${LLM_MODEL:-deepseek-v4-flash}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.openai.com/v1}
       - LOG_LEVEL=${LOG_LEVEL:-info}
-      - OTLP_ENDPOINT=localhost:4317
-      - DATABASE_URL=${DATABASE_URL:-postgres://fabula:fabula@localhost:5432/fabula?sslmode=disable}
+      - OTLP_ENDPOINT=jaeger:4317
+      - DATABASE_URL=${DATABASE_URL:-postgres://fabula:fabula@postgres:5432/fabula?sslmode=disable}
       - JWT_SECRET=${JWT_SECRET:-fabula-local-development-secret}
       - JWT_TTL=${JWT_TTL:-24h}
-      - HTTP_PROXY=http://127.0.0.1:7897
-      - HTTPS_PROXY=http://127.0.0.1:7897
-      - NO_PROXY=localhost,127.0.0.1,::1
+      - HTTP_PROXY=http://host.docker.internal:7897
+      - HTTPS_PROXY=http://host.docker.internal:7897
+      - NO_PROXY=localhost,127.0.0.1,::1,postgres,jaeger,backend
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       - jaeger
       - postgres
@@ -58,7 +62,7 @@ services:
     image: nginx:1.27-alpine
     container_name: fabula-agui-test
     ports:
-      - "5175:80"
+      - "80:80"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

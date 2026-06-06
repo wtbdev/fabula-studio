@@ -62,7 +62,7 @@ echo "   - API: http://localhost:${API_PORT}"
 echo "   - Events: http://localhost:${API_PORT}/api/events"
 echo "   - SSE Stream: http://localhost:${API_PORT}/api/events/stream"
 echo ""
-echo "📊 Monitor page: file://$(pwd)/../test/monitor.html"
+echo "📊 Tree visualizer: http://localhost/"
 echo ""
 echo "Press Ctrl+C to stop all services"
 
