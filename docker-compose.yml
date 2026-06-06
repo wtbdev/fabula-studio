@@ -11,21 +11,62 @@ services:
       - COLLECTOR_OTLP_ENABLED=true
     restart: unless-stopped
 
+  # PostgreSQL
+  postgres:
+    image: postgres:17-alpine
+    container_name: fabula-postgres
+    environment:
+      - POSTGRES_USER=fabula
+      - POSTGRES_PASSWORD=fabula
+      - POSTGRES_DB=fabula
+    ports:
+      - "5432:5432"
+    volumes:
+      - fabula-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fabula -d fabula"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
   # Backend
   backend:
-    build:
-      context: ./apps/backend
-      dockerfile: Dockerfile
+    image: fabula-backend:latest
     container_name: fabula-backend
-    ports:
-      - "8080:8080"
+    network_mode: host
     environment:
       - LISTEN_ADDR=:8080
       - LLM_MODEL=${LLM_MODEL:-deepseek-v4-flash}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.openai.com/v1}
       - LOG_LEVEL=${LOG_LEVEL:-info}
-      - OTLP_ENDPOINT=jaeger:4317
+      - OTLP_ENDPOINT=localhost:4317
+      - DATABASE_URL=${DATABASE_URL:-postgres://fabula:fabula@localhost:5432/fabula?sslmode=disable}
+      - JWT_SECRET=${JWT_SECRET:-fabula-local-development-secret}
+      - JWT_TTL=${JWT_TTL:-24h}
+      - HTTP_PROXY=http://127.0.0.1:7897
+      - HTTPS_PROXY=http://127.0.0.1:7897
+      - NO_PROXY=localhost,127.0.0.1,::1
     depends_on:
       - jaeger
+      - postgres
     restart: unless-stopped
+
+  # AG-UI Test Frontend
+  agui-test:
+    image: nginx:1.27-alpine
+    container_name: fabula-agui-test
+    ports:
+      - "5175:80"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./test:/usr/share/nginx/html:ro
+      - ./docker/agui-test-nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  fabula-postgres-data:
