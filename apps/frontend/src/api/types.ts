@@ -1,8 +1,16 @@
 import type { PageParams } from './request'
 
 export type ProjectStatus = 'draft' | 'generating' | 'completed' | 'failed'
+export type SceneSuggestionType =
+  | 'dialogue'
+  | 'conflict'
+  | 'rhythm'
+  | 'character'
+  | 'structure'
+  | 'visual'
+export type SceneSuggestionStatus = 'pending' | 'accepted' | 'dismissed'
 
-export type AdaptStyle = '影视剧' | '短剧' | '舞台剧' | '广播剧'
+export type AdaptStyle = '影视剧' | '短剧' | '舞台剧' | '广播剧' | (string & {})
 export type DialogueLevel = '简略' | '适中' | '详细'
 export type AdaptationMode = '忠实原文' | '适度改编' | '大胆改编'
 export type SceneGranularity = '少量大场' | '适中' | '较多小场'
@@ -121,9 +129,66 @@ export interface UpdateSceneRequest {
   timeText?: string
   summary?: string
   content: string
+  versionSource?: 'manual_save' | 'ai_regenerate' | 'restore'
 }
 
 export interface UpdateSceneResponse {
   id: string
+  updatedAt: string
+}
+
+export type SceneRegenerationMode = 'replace' | 'polish' | 'shorten' | 'expand'
+
+export interface GenerateSceneRegenerationRequest {
+  instruction?: string
+  mode?: SceneRegenerationMode
+}
+
+export interface GenerateSceneRegenerationResponse {
+  sceneId: string
+  originalContent: string
+  regeneratedContent: string
+  instruction: string
+  costPoints: number
+  remainingPoints: number
+}
+
+export interface SceneSuggestion {
+  id: string
+  projectId: string
+  sceneId: string
+  type: SceneSuggestionType
+  title: string
+  problem: string
+  reason: string
+  suggestion: string
+  applyText?: string
+  status: SceneSuggestionStatus
+  createdAt: string
+  updatedAt: string
+}
+
+export interface SceneSuggestionListParams {
+  status?: SceneSuggestionStatus | 'all'
+}
+
+export interface GenerateSceneSuggestionsRequest {
+  content: string
+  count?: number
+}
+
+export interface GenerateSceneSuggestionsResponse {
+  costPoints: number
+  remainingPoints: number
+  suggestions: SceneSuggestion[]
+}
+
+export interface UpdateSceneSuggestionRequest {
+  status: Exclude<SceneSuggestionStatus, 'pending'>
+}
+
+export interface UpdateSceneSuggestionResponse {
+  id: string
+  status: Exclude<SceneSuggestionStatus, 'pending'>
   updatedAt: string
 }

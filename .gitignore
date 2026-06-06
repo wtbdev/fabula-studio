@@ -28,3 +28,8 @@ dist/
 # Build artifacts
 *.tmp
 *.log
+
+# Codex and local agent metadata
+.codex/
+.agents/
+skills-lock.json
