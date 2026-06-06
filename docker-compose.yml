@@ -47,11 +47,6 @@ services:
       - DATABASE_URL=${DATABASE_URL:-postgres://fabula:fabula@postgres:5432/fabula?sslmode=disable}
       - JWT_SECRET=${JWT_SECRET:-fabula-local-development-secret}
       - JWT_TTL=${JWT_TTL:-24h}
-      - HTTP_PROXY=http://host.docker.internal:7897
-      - HTTPS_PROXY=http://host.docker.internal:7897
-      - NO_PROXY=localhost,127.0.0.1,::1,postgres,jaeger,backend
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     depends_on:
       - jaeger
       - postgres
