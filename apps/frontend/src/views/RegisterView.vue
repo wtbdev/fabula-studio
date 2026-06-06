@@ -10,6 +10,7 @@ import {
   UserPlus,
 } from 'lucide-vue-next'
 import { useAuth } from '../composables/useAuth'
+import { getFormValidationMessage } from '../utils/formErrors'
 import type { FormInst, FormRules } from 'naive-ui'
 
 const router = useRouter()
@@ -81,8 +82,8 @@ const handleRegister = async () => {
     message.success('注册成功')
     await router.push('/projects')
   } catch (error) {
-    if (Array.isArray(error)) return
-    message.error(getErrorMessage(error))
+    const validationMessage = getFormValidationMessage(error)
+    message.error(validationMessage || getErrorMessage(error))
   } finally {
     loading.value = false
   }

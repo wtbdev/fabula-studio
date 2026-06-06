@@ -12,6 +12,7 @@ import {
 } from 'lucide-vue-next'
 import { generationApi, projectsApi } from '../api'
 import { useAuth } from '../composables/useAuth'
+import { getFormValidationMessage } from '../utils/formErrors'
 import type { FormInst, FormRules } from 'naive-ui'
 import type {
   AdaptationMode,
@@ -78,11 +79,8 @@ const rules: FormRules = {
   sourceText: [
     { required: true, message: '请粘贴或导入小说文本', trigger: ['blur', 'input'] },
     {
-      validator: (_rule: unknown, value: string) => {
-        const chapterCount = value.match(/第[一二三四五六七八九十百千万\d]+章/g)?.length ?? 0
-        return chapterCount >= 3
-      },
-      message: '请至少提供 3 章文本，便于拆分剧本场次',
+      validator: (_rule: unknown, value: string) => value.trim().length >= 20,
+      message: '小说文本至少需要 20 个字',
       trigger: ['blur', 'input'],
     },
   ],
@@ -146,8 +144,8 @@ const handleSaveDraft = async () => {
     message.success('项目草稿已保存')
     await router.push('/projects')
   } catch (error) {
-    if (Array.isArray(error)) return
-    message.error(getErrorMessage(error))
+    const validationMessage = getFormValidationMessage(error)
+    message.error(validationMessage || getErrorMessage(error))
   } finally {
     activeAction.value = ''
   }
@@ -168,8 +166,8 @@ const handleCreateAndGenerate = async () => {
     message.success('剧本生成成功，已扣除 300 点')
     await router.push(`/projects/${project.id}/edit`)
   } catch (error) {
-    if (Array.isArray(error)) return
-    message.error(getErrorMessage(error))
+    const validationMessage = getFormValidationMessage(error)
+    message.error(validationMessage || getErrorMessage(error))
   } finally {
     activeAction.value = ''
   }

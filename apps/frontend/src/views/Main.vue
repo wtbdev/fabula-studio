@@ -20,6 +20,7 @@ import {
 } from 'lucide-vue-next'
 import { generationApi, projectsApi } from '../api'
 import { useAuth } from '../composables/useAuth'
+import { getFormValidationMessage } from '../utils/formErrors'
 import type { FormInst, FormRules } from 'naive-ui'
 import type { ProjectDTO, ProjectStatus } from '../api'
 
@@ -163,8 +164,8 @@ const handleUpdateProject = async () => {
     editVisible.value = false
     await fetchProjects()
   } catch (error) {
-    if (Array.isArray(error)) return
-    message.error(getErrorMessage(error))
+    const validationMessage = getFormValidationMessage(error)
+    message.error(validationMessage || getErrorMessage(error))
   } finally {
     editLoading.value = false
   }

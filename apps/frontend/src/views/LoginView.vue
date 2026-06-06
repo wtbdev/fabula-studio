@@ -10,6 +10,7 @@ import {
   LogIn,
 } from 'lucide-vue-next'
 import { useAuth } from '../composables/useAuth'
+import { getFormValidationMessage } from '../utils/formErrors'
 import type { FormInst, FormRules } from 'naive-ui'
 
 const route = useRoute()
@@ -83,8 +84,8 @@ const handleLogin = async () => {
     message.success('登录成功')
     await router.push(resolveRedirectTarget())
   } catch (error) {
-    if (Array.isArray(error)) return
-    message.error(getErrorMessage(error))
+    const validationMessage = getFormValidationMessage(error)
+    message.error(validationMessage || getErrorMessage(error))
   } finally {
     loading.value = false
   }
