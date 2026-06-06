@@ -6,6 +6,7 @@ services:
     ports:
       - "4317:4317"    # OTLP gRPC
       - "4318:4318"    # OTLP HTTP
+      - "16686:16686"  # Jaeger UI
     environment:
       - COLLECTOR_OTLP_ENABLED=true
       - QUERY_BASE_PATH=/jaeger
@@ -52,12 +53,25 @@ services:
       - postgres
     restart: unless-stopped
 
+  # Frontend
+  frontend:
+    image: fabula-frontend:latest
+    build:
+      context: .
+      dockerfile: apps/frontend/Dockerfile
+    container_name: fabula-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
   # AG-UI Test Frontend
   agui-test:
     image: nginx:1.27-alpine
     container_name: fabula-agui-test
     ports:
-      - "80:80"
+      - "8081:80"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

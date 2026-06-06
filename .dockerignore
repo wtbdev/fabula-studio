@@ -1,0 +1,5 @@
+.git
+**/node_modules
+**/dist
+apps/backend/fabula-server
+apps/backend/ca-certificates.crt
