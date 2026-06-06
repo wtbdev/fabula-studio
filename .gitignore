@@ -29,6 +29,7 @@ dist/
 *.tmp
 *.log
 
-# Codex && AI
+# Codex and local agent metadata
 .codex/
 .agents/
+skills-lock.json
