@@ -1,7 +1,26 @@
 {
-  "name": "@fabula-studio/frontend",
-  "version": "0.0.0",
+  "name": "frontend",
   "private": true,
-  "description": "Fabula Studio - AI-powered novel to screenplay conversion tool (frontend placeholder)",
-  "scripts": {}
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc -b && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@vicons/ionicons5": "^0.13.0",
+    "@vueuse/core": "^14.3.0",
+    "axios": "^1.17.0",
+    "naive-ui": "^2.44.1",
+    "vue": "^3.5.34"
+  },
+  "devDependencies": {
+    "@types/node": "^24.12.3",
+    "@vitejs/plugin-vue": "^6.0.6",
+    "@vue/tsconfig": "^0.9.1",
+    "typescript": "~6.0.2",
+    "vite": "^8.0.12",
+    "vue-tsc": "^3.2.8"
+  }
 }
