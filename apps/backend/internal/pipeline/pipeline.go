@@ -15,36 +15,37 @@ import (
 	"github.com/fabula-studio/backend/internal/agent"
 	"github.com/fabula-studio/backend/internal/graph"
 	"github.com/fabula-studio/backend/internal/observability"
-	"github.com/fabula-studio/backend/internal/schema"
 	"github.com/fabula-studio/backend/internal/scene"
+	"github.com/fabula-studio/backend/internal/schema"
+	"github.com/fabula-studio/backend/internal/segment"
 	"github.com/fabula-studio/backend/internal/tree"
 	"github.com/fabula-studio/backend/internal/validator"
 )
 
 // PipelineStatus holds the current state of the pipeline.
 type PipelineStatus struct {
-	State       string    `json:"state"`        // idle, running, completed, failed
+	State       string    `json:"state"` // idle, running, completed, failed
 	CurrentStep string    `json:"current_step"`
-	Progress    int       `json:"progress"`      // 0-100
+	Progress    int       `json:"progress"` // 0-100
 	Error       string    `json:"error,omitempty"`
 	StartedAt   time.Time `json:"started_at"`
 }
 
 // PipelineResult holds the complete output of a pipeline run.
 type PipelineResult struct {
-	Tree       *tree.StoryTree    `json:"tree"`
-	GraphMgr   *graph.Manager     `json:"-"`
-	Plans      []*scene.ScenePlan `json:"plans"`
-	Screenplay *schema.Screenplay `json:"screenplay"`
-	YAMLStr    string             `json:"yaml"`
-	Duration   time.Duration      `json:"duration"`
-	CompletedAt time.Time         `json:"completed_at"`
+	Tree        *tree.StoryTree    `json:"tree"`
+	GraphMgr    *graph.Manager     `json:"-"`
+	Plans       []*scene.ScenePlan `json:"plans"`
+	Screenplay  *schema.Screenplay `json:"screenplay"`
+	YAMLStr     string             `json:"yaml"`
+	Duration    time.Duration      `json:"duration"`
+	CompletedAt time.Time          `json:"completed_at"`
 }
-
 
 // Pipeline orchestrates the full novel-to-screenplay conversion.
 type Pipeline struct {
 	config         Config
+	unitAggregator *agent.UnitAggregatorAgent
 	nodeAnalyzer   *agent.NodeAnalyzerAgent
 	graphAnalyzer  *agent.GraphAnalyzerAgent
 	scenePlanner   *agent.ScenePlannerAgent
@@ -63,6 +64,7 @@ type Pipeline struct {
 func New(cfg Config, modelName, apiKey, baseURL string, eventBus *observability.EventBus) *Pipeline {
 	return &Pipeline{
 		config:         cfg,
+		unitAggregator: agent.NewUnitAggregatorAgent(modelName, apiKey, baseURL),
 		nodeAnalyzer:   agent.NewNodeAnalyzerAgent(modelName, apiKey, baseURL),
 		graphAnalyzer:  agent.NewGraphAnalyzerAgent(modelName, apiKey, baseURL),
 		scenePlanner:   agent.NewScenePlannerAgent(modelName, apiKey, baseURL),
@@ -73,7 +75,6 @@ func New(cfg Config, modelName, apiKey, baseURL string, eventBus *observability.
 		tracer:         otel.Tracer("fabula-pipeline"),
 	}
 }
-
 
 // publishEvent sends an event to the event bus if available.
 func (p *Pipeline) publishEvent(event observability.PipelineEvent) {
@@ -144,66 +145,44 @@ func (p *Pipeline) Convert(ctx context.Context, title, author string, chapters [
 	})
 
 	p.mu.Lock()
-	p.status.CurrentStep = "build_tree"
+	p.status.CurrentStep = "aggregate_units"
 	p.status.Progress = 5
 	p.mu.Unlock()
 
-	// Step 1-3: Build story tree with hard cuts and horizontal chains
+	// Step 1-2: Split chapters into sentences and aggregate story units.
 	stepStart := time.Now()
-	ctx, treeSpan := p.tracer.Start(ctx, "pipeline.build_tree")
+	ctx, treeSpan := p.tracer.Start(ctx, "pipeline.aggregate_units")
 	p.publishEvent(observability.PipelineEvent{
 		Type:    observability.EventNodeAnalyzing,
-		Step:    "build_tree",
-		Message: "步骤 1/7: 构建故事树...",
+		Step:    "aggregate_units",
+		Message: "步骤 1/7: 聚合剧情单元...",
 	})
-	st := p.buildTree(chapters)
-	treeSpan.End()
-
-	// Emit the complete initial tree so the frontend can render it immediately
-	p.publishEvent(observability.PipelineEvent{
-		Type:    observability.EventTreeSnapshot,
-		Step:    "build_tree",
-		Message: fmt.Sprintf("故事树构建完成: %d 节点, %d 叶子", len(st.Nodes), len(st.LeafNodeIDs)),
-		Details: map[string]interface{}{
-			"tree": st,
-		},
-	})
-
-	p.mu.Lock()
-	p.status.CurrentStep = "analyze_nodes"
-	p.status.Progress = 15
-	p.mu.Unlock()
-
-	// Step 4-6: Analyze nodes recursively
-	stepStart = time.Now()
-	ctx, analyzeSpan := p.tracer.Start(ctx, "pipeline.analyze_nodes")
-	p.publishEvent(observability.PipelineEvent{
-		Type:    observability.EventNodeAnalyzing,
-		Step:    "analyze_nodes",
-		Message: "步骤 2/7: 分析节点...",
-	})
-	if err := p.analyzeNodes(ctx, st, 0); err != nil {
-		analyzeSpan.RecordError(err)
-		analyzeSpan.End()
+	st, err := p.buildTree(ctx, chapters)
+	if err != nil {
+		treeSpan.RecordError(err)
+		treeSpan.End()
 		p.mu.Lock()
 		p.status.State = "failed"
 		p.status.Error = err.Error()
 		p.mu.Unlock()
 		p.publishEvent(observability.PipelineEvent{
 			Type:  observability.EventError,
-			Step:  "analyze_nodes",
+			Step:  "aggregate_units",
 			Error: err.Error(),
 		})
-		return nil, fmt.Errorf("node analysis failed: %w", err)
+		return nil, fmt.Errorf("unit aggregation failed: %w", err)
 	}
-	analyzeSpan.End()
+	treeSpan.End()
 	st.UpdateLeafIDs()
+
+	// Emit the complete aggregated tree so the frontend can render it immediately.
 	p.publishEvent(observability.PipelineEvent{
-		Type:     observability.EventNodeAnalyzed,
-		Step:     "analyze_nodes",
-		Message:  fmt.Sprintf("节点分析完成: %d 叶子节点", len(st.LeafNodeIDs)),
+		Type:     observability.EventTreeSnapshot,
+		Step:     "aggregate_units",
+		Message:  fmt.Sprintf("剧情单元聚合完成: %d 节点, %d 叶子", len(st.Nodes), len(st.LeafNodeIDs)),
 		Duration: durationPtr(time.Since(stepStart)),
 		Details: map[string]interface{}{
+			"tree":        st,
 			"total_nodes": len(st.Nodes),
 			"leaf_nodes":  len(st.LeafNodeIDs),
 		},
@@ -290,11 +269,11 @@ func (p *Pipeline) Convert(ctx context.Context, title, author string, chapters [
 	planSummaries := make([]map[string]interface{}, len(plans))
 	for i, plan := range plans {
 		planSummaries[i] = map[string]interface{}{
-			"id":             plan.ID,
+			"id":              plan.ID,
 			"source_node_ids": plan.SourceNodeIDs,
-			"scene_count":    plan.SceneCount,
-			"purpose":        plan.Purpose,
-			"location":       plan.Location,
+			"scene_count":     plan.SceneCount,
+			"purpose":         plan.Purpose,
+			"location":        plan.Location,
 		}
 	}
 	p.publishEvent(observability.PipelineEvent{
@@ -490,10 +469,27 @@ func durationPtr(d time.Duration) *time.Duration {
 	return &d
 }
 
-// buildTree creates the story tree from chapters (Steps 1-3).
-func (p *Pipeline) buildTree(chapters []string) *tree.StoryTree {
-	splitter := tree.NewSplitter(p.config.MaxChunkSize)
-	return splitter.SplitChapters(chapters)
+// buildTree creates a flat unit tree from sentence-stream aggregation.
+func (p *Pipeline) buildTree(ctx context.Context, chapters []string) (*tree.StoryTree, error) {
+	sentences := segment.SplitChapters(chapters)
+	if len(sentences) == 0 {
+		return nil, fmt.Errorf("no usable sentences found")
+	}
+	units := make([]segment.UnitResult, 0)
+	for start := 0; start < len(sentences); {
+		state := segment.NewAggregationState(sentences, start, segment.DefaultBatchSize)
+		result, err := p.unitAggregator.Aggregate(ctx, state)
+		if err != nil {
+			return nil, fmt.Errorf("aggregate from %s: %w", sentences[start].ID, err)
+		}
+		end, err := state.ValidateFinish(result)
+		if err != nil {
+			return nil, fmt.Errorf("validate aggregation from %s: %w", sentences[start].ID, err)
+		}
+		units = append(units, *result)
+		start = end + 1
+	}
+	return segment.BuildTree(sentences, units)
 }
 
 // analyzeNodes recursively analyzes and refines the story tree (Steps 4-6).

@@ -22,15 +22,22 @@ type Event struct {
 // StoryNode is a single unit in the recursive story tree.
 // It holds both raw text and AI-analyzed structural information.
 type StoryNode struct {
-	ID            string       `json:"id"`
-	ParentID      string       `json:"parent_id"`
-	Level         int          `json:"level"`
-	TextContent   string       `json:"text_content"`
-	CharStart     int          `json:"char_start"`
-	CharEnd       int          `json:"char_end"`
-	SourceChapter int          `json:"source_chapter"`
-	ChildrenIDs   []string     `json:"children_ids"`
-	RightNeighbor string       `json:"right_neighbor"`
+	ID            string   `json:"id"`
+	ParentID      string   `json:"parent_id"`
+	Level         int      `json:"level"`
+	TextContent   string   `json:"text_content"`
+	CharStart     int      `json:"char_start"`
+	CharEnd       int      `json:"char_end"`
+	SourceChapter int      `json:"source_chapter"`
+	ChildrenIDs   []string `json:"children_ids"`
+	RightNeighbor string   `json:"right_neighbor"`
+
+	// Sentence-stream source metadata
+	StartSentenceID   string   `json:"start_sentence_id,omitempty"`
+	EndSentenceID     string   `json:"end_sentence_id,omitempty"`
+	SourceSentenceIDs []string `json:"source_sentence_ids,omitempty"`
+	BoundaryReason    string   `json:"boundary_reason,omitempty"`
+	UnitType          string   `json:"unit_type,omitempty"`
 
 	// AI analysis results
 	Summary      string   `json:"summary"`
@@ -42,8 +49,8 @@ type StoryNode struct {
 	IsComplete   bool     `json:"is_complete"`
 
 	// Processing decision
-	Decision     NodeDecision `json:"decision"`
-	SplitReason  string       `json:"split_reason,omitempty"`
+	Decision    NodeDecision `json:"decision"`
+	SplitReason string       `json:"split_reason,omitempty"`
 }
 
 // StoryTree is the full recursive decomposition of a novel.
