@@ -843,6 +843,10 @@
         if (node.location) rows.push(field('地点', escapeHtml(node.location)));
         if (node.time_frame) rows.push(field('时间', escapeHtml(node.time_frame)));
         if (node.split_reason) rows.push(field('拆分原因', escapeHtml(node.split_reason)));
+        if (node.unit_type) rows.push(field('单元类型', escapeHtml(node.unit_type)));
+        if (node.start_sentence_id || node.end_sentence_id) rows.push(field('句子范围', `${escapeHtml(node.start_sentence_id || '-') } → ${escapeHtml(node.end_sentence_id || '-')}`));
+        if (node.source_sentence_ids?.length) rows.push(listField('源句子ID', node.source_sentence_ids));
+        if (node.boundary_reason) rows.push(field('边界原因', escapeHtml(node.boundary_reason)));
         if (node.children_ids?.length) rows.push(listField('子节点', node.children_ids));
         if (node.parent_id) rows.push(field('父节点', escapeHtml(node.parent_id)));
         if (node.right_neighbor) rows.push(field('右邻居', escapeHtml(node.right_neighbor)));
