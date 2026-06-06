@@ -8,7 +8,6 @@ import (
 	"trpc.group/trpc-go/trpc-agent-go/agent/llmagent"
 	"trpc.group/trpc-go/trpc-agent-go/model"
 	"trpc.group/trpc-go/trpc-agent-go/model/openai"
-
 	"github.com/fabula-studio/backend/internal/tree"
 	"github.com/fabula-studio/backend/internal/util"
 )
@@ -31,35 +30,35 @@ type NodeAnalysisResult struct {
 	SplitReason  string       `json:"split_reason,omitempty"`
 }
 
-const nodeAnalyzerDesc = "Analyzes a single story node and extracts structure, decides processing path"
-const nodeAnalyzerPrompt = `You are a professional literary analyst specializing in novel-to-screenplay adaptation.
+const nodeAnalyzerDesc = "分析单个故事节点，提取结构，决定处理路径"
+const nodeAnalyzerPrompt = `你是一名专业文学分析师，专精于小说到剧本的改编。
 
-You will receive a text fragment from a novel. Analyze it and output a JSON object with these fields:
+你将收到一段小说文本片段。分析它并输出一个 JSON 对象，包含以下字段：
 
-1. summary: One-paragraph summary of what happens in this fragment.
-2. main_conflict: The central dramatic conflict or tension (one sentence).
-3. characters: List of character names that appear.
-4. events: List of events, each with:
-   - description: What happens
-   - characters: Who is involved
-   - impact: How it affects the story
-5. location: Where the action takes place.
-6. time_frame: When the action takes place.
-7. is_complete: true if this fragment tells a complete mini-story (has setup, action, and resolution/consequence). false if it feels cut off mid-action or mid-dialogue.
-8. decision: One of:
-   - "keep": Fragment is complete and manageable in length, ready for scene adaptation.
-   - "split": Fragment is too long or complex, needs to be divided further.
-   - "merge_right": Fragment is cut off and needs the next fragment to complete the current event.
-   - "summarize_only": Fragment has informational value but is not suitable for direct scene adaptation (e.g., exposition, backstory, internal monologue).
-   - "discard": Fragment has no significant value for the screenplay.
-9. split_reason: If decision is "split", explain why (e.g., "multiple location changes", "too many characters").
+1. summary: 该片段内容的一段话摘要
+2. main_conflict: 核心戏剧冲突或张力（一句话）
+3. characters: 出现的人物名称列表
+4. events: 事件列表，每个事件包含：
+   - description: 发生了什么
+   - characters: 涉及的人物
+   - impact: 对故事的影响
+5. location: 故事发生地点
+6. time_frame: 故事发生时间
+7. is_complete: true 表示该片段讲述了一个完整的微故事（有起承转合），false 表示感觉被截断了
+8. decision: 以下之一：
+   - "keep": 片段完整且长度适中，可直接用于场景改编
+   - "split": 片段太长或太复杂，需要进一步拆分
+   - "merge_right": 片段被截断，需要与下一片段合并才能构成完整事件
+   - "summarize_only": 片段有价值但不适合直接改编为场景（如背景交代、内心独白）
+   - "discard": 片段对剧本没有重要价值
+9. split_reason: 如果 decision 为 "split"，说明原因（如"多次换景"、"角色太多"）
 
-Important:
-- A fragment ending mid-dialogue or mid-action should be "merge_right".
-- Background exposition, worldbuilding, or long internal monologue should be "summarize_only".
-- Only use "discard" for truly redundant content.
+重要：
+- 对话中途或动作中途结束的片段应标记为 "merge_right"
+- 背景交代、世界观构建或长篇内心独白应标记为 "summarize_only"
+- 只有真正冗余的内容才标记为 "discard"
 
-Output ONLY valid JSON. No markdown fences, no commentary.`
+只输出合法 JSON，不要 markdown 代码块，不要额外注释。`
 
 // NewNodeAnalyzerAgent creates the node analysis agent.
 func NewNodeAnalyzerAgent(modelName, apiKey, baseURL string) *NodeAnalyzerAgent {

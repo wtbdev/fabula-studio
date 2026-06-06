@@ -10,6 +10,7 @@ import (
 	"trpc.group/trpc-go/trpc-agent-go/model/openai"
 
 	"github.com/fabula-studio/backend/internal/scene"
+
 	"github.com/fabula-studio/backend/internal/tree"
 	"github.com/fabula-studio/backend/internal/util"
 )
@@ -19,39 +20,39 @@ type ScenePlannerAgent struct {
 	agent *llmagent.LLMAgent
 }
 
-const scenePlannerDesc = "Plans how story leaf nodes map to screenplay scenes"
-const scenePlannerPrompt = `You are a screenplay structure specialist. You decide how story fragments should become scenes.
+const scenePlannerDesc = "规划故事叶节点如何映射到剧本场景"
+const scenePlannerPrompt = `你是一名剧本结构专家。你决定故事片段应该如何变成场景。
 
-You will receive a list of leaf nodes (story fragments that have been analyzed and deemed ready for adaptation).
-For each node, decide how it maps to scenes:
+你将收到一个叶节点列表（已分析完毕、可进行改编的故事片段）。
+对每个节点，决定它如何映射到场景：
 
-- scene_count: 0 = summary only (background/exposition, not shown on screen)
-                1 = single scene
-                2+ = multiple scenes (if location/time/conflict changes significantly within the fragment)
-- purpose: The dramatic purpose of this scene in the overall story
-- key_plot_points: Essential plot points that MUST be preserved
-- omit_details: Novel details that can be cut for pacing
+- scene_count: 0 = 仅摘要（背景交代，不在屏幕上展示）
+                1 = 单个场景
+                2+ = 多个场景（如果片段内地点/时间/冲突有显著变化）
+- purpose: 该场景在整个故事中的戏剧目的
+- key_plot_points: 必须保留的关键情节点
+- omit_details: 为节奏考虑可删减的小说细节
 
-You may also recommend merging adjacent short nodes into a single scene if they share:
-- Same location
-- Same time
-- Continuous action
-- Same dramatic goal
+如果相邻短节点满足以下条件，可以合并为同一场景：
+- 同一地点
+- 同一时间
+- 连续的动作
+- 同一戏剧目标
 
-Output a JSON array of scene plans, each with:
+输出一个场景规划 JSON 数组，每个包含：
 - id: "plan_NNN"
-- source_node_ids: Array of leaf node IDs this plan covers
-- scene_count: Number of scenes to generate
-- purpose: Dramatic purpose
-- location: Primary location
-- time_frame: Primary time
-- characters: Array of character names/IDs present
-- key_plot_points: Must-keep story beats
-- omit_details: Can-cut details
-- sequence: Order in the full screenplay (1, 2, 3...)
-- summary_only: If scene_count=0, provide the summary text here
+- source_node_ids: 该规划涉及的叶节点 ID 数组
+- scene_count: 要生成的场景数量
+- purpose: 戏剧目的
+- location: 主要地点
+- time_frame: 主要时间
+- characters: 出场角色名称/ID 数组
+- key_plot_points: 必须保留的故事节拍
+- omit_details: 可删减的细节
+- sequence: 在完整剧本中的顺序（1, 2, 3...）
+- summary_only: 如果 scene_count=0，在此提供摘要文本
 
-Output ONLY valid JSON. No markdown fences, no commentary.`
+只输出合法 JSON，不要 markdown 代码块，不要额外注释。`
 
 // NewScenePlannerAgent creates the scene planning agent.
 func NewScenePlannerAgent(modelName, apiKey, baseURL string) *ScenePlannerAgent {

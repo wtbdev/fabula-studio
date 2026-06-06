@@ -20,29 +20,28 @@ type GraphAnalyzerAgent struct {
 	agent *llmagent.LLMAgent
 }
 
-const graphAnalyzerDesc = "Updates character states, relationships, and story conflicts based on a story node"
+const graphAnalyzerDesc = "基于故事节点更新角色状态、关系和故事冲突"
+const graphAnalyzerToolPrompt = `你是一名故事连贯性专家。你维护一个动态的角色关系图谱。
 
-const graphAnalyzerToolPrompt = `You are a story continuity specialist. You maintain a dynamic character relationship graph.
+你将收到：
+1. 一个故事片段（当前节点）。
+2. 当前的角色图谱状态（在该片段之前）。
 
-You will receive:
-1. A story fragment (the current node).
-2. The current state of the character graph (before this fragment).
+你的任务是通过调用提供的工具来确定这个片段引入的变化：
 
-Your job is to determine what changes this fragment introduces by calling the provided tools:
+1. **add_character**: 添加新引入的角色（id, name, current_goal, emotional_state, personality）
+2. **update_character**: 更新已有角色的状态（id, current_goal, emotional_state, new_known_info）
+3. **add_relation**: 添加或更新两角色之间的关系（from_id, to_id, type, description）
+4. **add_conflict**: 添加新的未解决冲突（description, characters）
+5. **resolve_conflict**: 标记已解决的冲突（index, resolution）
 
-1. **add_character**: Add a newly introduced character (id, name, current_goal, emotional_state, personality).
-2. **update_character**: Update an existing character's state (id, current_goal, emotional_state, new_known_info).
-3. **add_relation**: Add or update a relationship between two characters (from_id, to_id, type, description).
-4. **add_conflict**: Add a new unresolved conflict (description, characters).
-5. **resolve_conflict**: Mark an existing conflict as resolved (index, resolution).
-
-Critical rules:
-- ONLY report information present in this fragment.
-- Do NOT speculate about future events.
-- If a character learns something, call update_character with new_known_info.
-- Track relationship changes with their triggering events.
-- You may call multiple tools in sequence to fully capture all changes.
-- When done, output a brief summary of what you changed.`
+关键规则：
+- 只报告本片段中出现的信息
+- 不要推测未来的事件
+- 如果角色学到了什么，用 new_known_info 调用 update_character
+- 跟踪关系变化及其触发事件
+- 可以依次调用多个工具以完整捕捉所有变化
+- 完成后，输出你修改内容的简要总结`
 
 // NewGraphAnalyzerAgent creates the graph analysis agent.
 func NewGraphAnalyzerAgent(modelName, apiKey, baseURL string) *GraphAnalyzerAgent {
@@ -62,7 +61,7 @@ func NewGraphAnalyzerAgent(modelName, apiKey, baseURL string) *GraphAnalyzerAgen
 	// Combine validation tool with graph tools
 	graphTools := fabulatool.NewGraphTools()
 	allTools := make([]tool.Tool, 0, len(graphTools)+1)
-
+	
 	allTools = append(allTools, graphTools...)
 
 	agt := llmagent.New("graph-analyzer",

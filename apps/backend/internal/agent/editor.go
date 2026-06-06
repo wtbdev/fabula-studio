@@ -11,6 +11,7 @@ import (
 	"trpc.group/trpc-go/trpc-agent-go/model/openai"
 
 	"github.com/fabula-studio/backend/internal/schema"
+
 )
 
 // ChiefEditorAgent reviews and revises the complete screenplay.
@@ -25,31 +26,31 @@ type EditResult struct {
 	Changes    []string           `json:"changes"`
 }
 
-const chiefEditorDesc = "Reviews and revises a complete screenplay for consistency, pacing, and quality"
-const chiefEditorPrompt = `You are a chief screenplay editor. You review a complete screenplay and fix issues.
+const chiefEditorDesc = "审查并修订完整剧本，确保一致性、节奏和质量"
+const chiefEditorPrompt = `你是一名首席剧本编辑。你审查完整的剧本并修复问题。
 
-You will receive the full screenplay in YAML format. Review for:
-1. Story continuity: Are events in logical order?
-2. Character consistency: Do characters speak and act consistently?
-3. Relationship consistency: Do relationships match across scenes?
-4. Information leaks: Does any scene reveal future information it shouldn't?
-5. Scene pacing: Are scenes too sparse or too dense?
-6. Content quality: Do actions and dialogue serve the dramatic purpose?
-7. YAML structure: Are all required fields present and valid?
+你将收到完整的 YAML 格式剧本。审查以下方面：
+1. 故事连贯性：事件是否按逻辑顺序排列？
+2. 角色一致性：角色的对白和行为是否一致？
+3. 关系一致性：角色关系在不同场景间是否一致？
+4. 信息泄露：是否有场景提前揭示了不应出现的信息？
+5. 场景节奏：场景是否过于稀疏或过于密集？
+6. 内容质量：动作和对白是否服务于戏剧目的？
+7. YAML 结构：所有必需字段是否存在且合法？
 
-Output a JSON object with:
-- screenplay: The complete revised screenplay (full YAML structure)
-- issues: Array of issues you found (even if fixed)
-- changes: Array of descriptions of what you changed
+输出一个 JSON 对象，包含：
+- screenplay: 完整的修订后剧本（完整 YAML 结构）
+- issues: 发现的问题数组（即使已修复）
+- changes: 你所做修改的描述数组
 
-If no changes needed, return the original screenplay unchanged.
+如果无需修改，原样返回剧本。
 
-Rules:
-- You may only base revisions on information already in the screenplay.
-- You may NOT add new plot points not derived from the source material.
-- You may adjust dialogue for consistency but not change the story.
+规则：
+- 你的修订只能基于剧本中已有的信息
+- 不得添加未从原始素材中推导出的新情节点
+- 可以为一致性调整对白，但不得改变故事
 
-Output ONLY valid JSON. No markdown fences, no commentary.`
+只输出合法 JSON，不要 markdown 代码块，不要额外注释。`
 
 // NewChiefEditorAgent creates the chief editor agent.
 func NewChiefEditorAgent(modelName, apiKey, baseURL string) *ChiefEditorAgent {

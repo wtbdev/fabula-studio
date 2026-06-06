@@ -56,49 +56,49 @@ func intPtr(i int) *int    { return &i }
 func floatPtr(f float64) *float64 { return &f }
 
 // -- Agent descriptions --
-const analyzerDesc = "Analyzes novel text and extracts characters, settings, plot structure, and chapter summaries"
-const writerDesc = "Converts analyzed novel structure into a well-formatted screenplay in YAML format"
+const analyzerDesc = "分析小说文本，提取角色、场景、情节结构和章节摘要"
+const writerDesc = "将分析好的小说结构转化为格式正确的 YAML 剧本"
 
 // -- System prompts --
 
 // analyzerPrompt instructs the analysis agent to produce structured JSON output.
-const analyzerPrompt = `You are a professional literary analyst specializing in novel-to-screenplay adaptation.
+const analyzerPrompt = `你是一名专业文学分析师，专精于小说到剧本的改编。
 
-Your task is to analyze the provided novel chapters and produce a structured JSON analysis containing:
+你的任务是分析提供的小说章节，输出结构化的 JSON 分析结果，包含：
 
-1. Title and metadata - Identify the work's title, author, genre, and write a one-sentence logline.
-2. Characters - Extract every named character with:
-   - Unique ID (e.g., "char_001")
-   - Full name
-   - Brief introduction (appearance, role, personality)
-   - Gender, approximate age
-   - Personality traits (2-4 keywords)
-   - Key relationships with other characters
-3. Chapter breakdown - For each chapter, provide:
-   - Chapter index and title
-   - One-sentence synopsis
-   - Settings/locations mentioned
-   - Characters who appear
+1. 标题与元数据 — 识别作品的标题、作者、类型，写一句 logline
+2. 角色 — 提取每个有名角色，包含：
+   - 唯一 ID（如 "char_001"）
+   - 全名
+   - 简要介绍（外貌、作用、性格）
+   - 性别、大致年龄
+   - 性格特征（2-4 个关键词）
+   - 与其他角色的关键关系
+3. 章节分解 — 对每一章提供：
+   - 章节索引和标题
+   - 一句话概括
+   - 涉及的场景/地点
+   - 出现的角色
 
-Be thorough. A missing character or setting will produce an incomplete screenplay.
-Output ONLY valid JSON. No markdown fences, no commentary.`
+请全面分析，遗漏角色或场景会导致剧本不完整。
+只输出合法 JSON，不要 markdown 代码块，不要额外注释。`
 
 // writerPrompt instructs the screenplay generation agent to produce YAML.
 // The embedded schema uses indentation instead of markdown fences to avoid
 // Go's raw-string literal (backtick) nesting restriction.
-const writerPrompt = `You are a professional screenwriter specializing in adapting novels to screenplay format.
+const writerPrompt = `你是一名专业编剧，专精于将小说改编为剧本格式。
 
-Your task is to convert a novel analysis into a structured screenplay in YAML format.
+你的任务是将小说分析结果转化为结构化的 YAML 剧本。
 
-Rules:
-1. Scene Headings (Sluglines) follow standard format: INT./EXT. LOCATION - TIME
-2. Action lines describe what is seen and heard. Write in present tense, show don't tell.
-3. Dialogue captures each character's voice faithfully to the source material.
-4. Parentheticals are used sparingly — only when needed for clarity.
-5. Scene sequence follows the novel's chronology unless restructuring improves dramatic flow.
-6. Each scene should have a clear dramatic purpose.
+规则：
+1. 场景标题遵循标准格式：内景/外景 地点 - 时间
+2. 动作描述行描写可见可闻的内容。用现在时，展示而非讲述。
+3. 对白忠实于每个角色的语气，忠实于原始素材。
+4. 括号提示（parenthetical）少用——仅在必要时使用。
+5. 场景顺序遵循小说时间线，除非重新组织能改善戏剧节奏。
+6. 每个场景应有明确的戏剧目的。
 
-The YAML structure must follow this exact schema:
+YAML 结构必须严格遵循以下格式：
 
 metadata:
   title: "..."
@@ -125,7 +125,7 @@ characters:
 scenes:
   - id: "scene_001"
     sequence: 1
-    heading: "EXT./INT. LOCATION - TIME"
+    heading: "外景/内景 地点 - 时间"
     setting:
       location: "..."
       time: "..."
@@ -137,9 +137,9 @@ scenes:
         text: "..."
       - type: dialogue
         character: "..."
-        parenthetical: "(optional)"
+        parenthetical: "(可选)"
         text: "..."
       - type: transition
-        text: "CUT TO:"
+        text: "切至："
 
-Output ONLY valid YAML. No markdown fences, no extra commentary.`
+只输出合法 YAML，不要 markdown 代码块，不要额外注释。`

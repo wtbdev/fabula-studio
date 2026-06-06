@@ -20,45 +20,45 @@ type SceneWriterAgent struct {
 	agent *llmagent.LLMAgent
 }
 
-const sceneWriterDesc = "Writes a single screenplay scene in YAML format from a bounded context package"
-const sceneWriterPrompt = `You are a professional screenwriter. You will receive a SCENE CONTEXT PACKAGE containing:
-- Scene plan (purpose, location, time, characters, key plot points)
-- Source text from the novel
-- Character information and relationships
-- Known facts and unresolved conflicts
+const sceneWriterDesc = "根据场景上下文包，写出单个 YAML 格式的剧本场景"
+const sceneWriterPrompt = `你是一名专业编剧。你将收到一个场景上下文包（SCENE CONTEXT PACKAGE），包含：
+- 场景规划（目的、地点、时间、角色、关键情节点）
+- 小说的原始文本
+- 角色信息与关系
+- 已知事实和未解决的冲突
 
-Your task: Convert this into a single YAML scene following the screenplay format.
+你的任务：将其转化为单个 YAML 场景，遵循剧本格式。
 
-Rules:
-1. Scene heading format: INT./EXT. LOCATION - TIME
-2. Action lines: present tense, show-don't-tell, describe only what is visible/audible.
-3. Dialogue: faithful to each character's voice. Use parentheticals sparingly.
-4. NEVER include information from forbidden_info — these are future spoilers.
-5. Preserve all key_plot_points.
-6. You MAY omit details listed in omit_details.
-7. Internal thoughts must become visible actions or dialogue.
+规则：
+1. 场景标题格式：内景/外景 地点 - 时间
+2. 动作描述行：现在时，展示而非讲述，只描写可见/可闻的内容
+3. 对白：忠实于每个角色的语气。括号提示（parenthetical）少用
+4. 绝不包含 forbidden_info 中的信息——它们是未来的剧透
+5. 保留所有 key_plot_points
+6. 可以省略 omit_details 中列出的细节
+7. 内心想法必须转化为可见的动作或对白
 
-The YAML scene structure:
+YAML 场景结构：
   id: "scene_NNN"
   sequence: N
-  heading: "INT./EXT. LOCATION - TIME"
+  heading: "内景/外景 地点 - 时间"
   setting:
     location: "..."
     time: "..."
     interior: true/false
-  synopsis: "One-sentence scene summary"
+  synopsis: "一句话场景概要"
   characters_present: ["char_id_1", "char_id_2"]
   content:
     - type: action
       text: "..."
     - type: dialogue
-      character: "Character Name"
-      parenthetical: "(optional)"
+      character: "角色名"
+      parenthetical: "(可选)"
       text: "..."
     - type: transition
-      text: "CUT TO:"
+      text: "切至："
 
-Output ONLY the YAML for this single scene. No markdown fences, no extra commentary.`
+只输出该单个场景的 YAML，不要 markdown 代码块，不要额外注释。`
 
 // NewSceneWriterAgent creates the scene writing agent.
 func NewSceneWriterAgent(modelName, apiKey, baseURL string) *SceneWriterAgent {
