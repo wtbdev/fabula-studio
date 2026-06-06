@@ -12,9 +12,13 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/fabula-studio/backend/internal/config"
+	"github.com/fabula-studio/backend/internal/db"
+	"github.com/fabula-studio/backend/internal/graph"
 	"github.com/fabula-studio/backend/internal/observability"
 	"github.com/fabula-studio/backend/internal/pipeline"
+	"github.com/fabula-studio/backend/internal/repo"
 	"github.com/fabula-studio/backend/internal/schema"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Server holds dependencies and registered handlers.
@@ -24,6 +28,8 @@ type Server struct {
 	eventBus  *observability.EventBus
 	telemetry *observability.Telemetry
 	agui      *AGUIServer
+	store     *repo.Store
+	pool      *pgxpool.Pool
 	http      *http.Server
 }
 
@@ -42,6 +48,14 @@ func New(cfg config.Config) *Server {
 		log.Printf("Warning: Failed to initialize telemetry: %v", err)
 	}
 	p := pipeline.New(pipeline.DefaultConfig(), cfg.ModelName, cfg.APIKey, cfg.BaseURL, eventBus)
+	if err := db.RunMigrations(cfg.DatabaseURL); err != nil {
+		log.Fatalf("failed to run database migrations: %v", err)
+	}
+	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	if err != nil {
+		log.Fatalf("failed to connect database: %v", err)
+	}
+	store := repo.NewStore(pool)
 
 	// Initialize AG-UI server
 	agui := NewAGUIServer(cfg.ModelName, cfg.APIKey, cfg.BaseURL, eventBus)
@@ -52,14 +66,28 @@ func New(cfg config.Config) *Server {
 		eventBus:  eventBus,
 		telemetry: telemetry,
 		agui:      agui,
+		store:     store,
+		pool:      pool,
 	}
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("/api/auth/", srv.handleAuth)
+	mux.HandleFunc("/api/projects", srv.handleProjects)
+	mux.HandleFunc("/api/projects/", srv.handleProjects)
+	mux.HandleFunc("/api/scenes/", srv.handleScenes)
 	mux.HandleFunc("/api/convert", srv.handleConvert)
 	mux.HandleFunc("/api/health", srv.handleHealth)
 	mux.HandleFunc("/api/events", eventBus.EventHandler())
 	mux.HandleFunc("/api/events/stream", eventBus.SSEHandler())
 	mux.HandleFunc("/api/trace", srv.handleTraceInfo)
+	mux.HandleFunc("/api/pipeline/status", srv.handlePipelineStatus)
+	mux.HandleFunc("/api/tree", srv.handleTree)
+	mux.HandleFunc("/api/graph", srv.handleGraph)
+	mux.HandleFunc("/api/plans", srv.handlePlans)
+	mux.HandleFunc("/api/screenplay", srv.handleScreenplay)
+
+	// Serve test pages
+	mux.Handle("/test/", http.StripPrefix("/test/", http.FileServer(http.Dir("/app/test"))))
 
 	// Register AG-UI routes
 	agui.Routes(mux)
@@ -102,6 +130,9 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	if s.telemetry != nil {
 		s.telemetry.Shutdown()
 	}
+	if s.pool != nil {
+		s.pool.Close()
+	}
 	return s.http.Shutdown(ctx)
 }
 
@@ -127,9 +158,9 @@ func (s *Server) handleConvert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(req.Chapters) < 3 {
+	if len(req.Chapters) < 1 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"error": "至少需要3个章节，当前仅提供 " + itoa(len(req.Chapters)) + " 个",
+			"error": "至少需要提供1段文本",
 		})
 		return
 	}
@@ -165,9 +196,87 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 // handleTraceInfo returns trace information.
 func (s *Server) handleTraceInfo(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"jaeger_ui": "http://localhost:16686",
-		"grafana":   "http://localhost:3000",
+		"jaeger_ui":     "http://localhost:16686",
+		"grafana":       "http://localhost:3000",
 		"otlp_endpoint": "localhost:4317",
+	})
+}
+
+// handlePipelineStatus returns the current pipeline status.
+func (s *Server) handlePipelineStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.pipeline.Status())
+}
+
+// handleTree returns the complete story tree from the last pipeline run.
+func (s *Server) handleTree(w http.ResponseWriter, r *http.Request) {
+	result := s.pipeline.Result()
+	if result == nil || result.Tree == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no pipeline result available"})
+		return
+	}
+	writeJSON(w, http.StatusOK, result.Tree)
+}
+
+// graphResponse is the JSON-serializable view of the character graph.
+type graphResponse struct {
+	Characters  []*graph.CharacterState `json:"characters"`
+	Relations   []graph.Relation        `json:"relations"`
+	Conflicts   []graph.Conflict        `json:"conflicts"`
+	Foreshadows []graph.Foreshadow      `json:"foreshadows"`
+}
+
+// handleGraph returns the final character graph snapshot.
+func (s *Server) handleGraph(w http.ResponseWriter, r *http.Request) {
+	_, after := s.pipeline.GraphSnapshots()
+	if after == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no graph data available"})
+		return
+	}
+	// Find the last snapshot (with the most characters)
+	var lastSnap *graph.GraphSnapshot
+	for _, snap := range after {
+		if lastSnap == nil || len(snap.Characters) > len(lastSnap.Characters) {
+			lastSnap = snap
+		}
+	}
+	if lastSnap == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no graph snapshot found"})
+		return
+	}
+	chars := make([]*graph.CharacterState, 0, len(lastSnap.Characters))
+	for _, cs := range lastSnap.Characters {
+		chars = append(chars, cs)
+	}
+	writeJSON(w, http.StatusOK, graphResponse{
+		Characters:  chars,
+		Relations:   lastSnap.Relations,
+		Conflicts:   lastSnap.UnresolvedConflicts,
+		Foreshadows: lastSnap.Foreshadows,
+	})
+}
+
+// handlePlans returns the scene plans from the last pipeline run.
+func (s *Server) handlePlans(w http.ResponseWriter, r *http.Request) {
+	result := s.pipeline.Result()
+	if result == nil || result.Plans == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no pipeline result available"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"plans": result.Plans,
+	})
+}
+
+// handleScreenplay returns the complete screenplay from the last pipeline run.
+func (s *Server) handleScreenplay(w http.ResponseWriter, r *http.Request) {
+	result := s.pipeline.Result()
+	if result == nil || result.Screenplay == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no pipeline result available"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"screenplay": result.Screenplay,
+		"yaml":       result.YAMLStr,
 	})
 }
 
@@ -207,7 +316,7 @@ func itoa(n int) string {
 func withCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
