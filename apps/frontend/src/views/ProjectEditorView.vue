@@ -106,6 +106,7 @@ interface GenerationLogSnapshot {
   plans: RealtimePlan[]
   sceneHeadings: RealtimeSceneHeading[]
   jobId: string | null
+  seenEventKeys: string[]
 }
 
 const saveGenerationLog = () => {
@@ -123,6 +124,7 @@ const saveGenerationLog = () => {
         plans: realtimePlans.value,
         sceneHeadings: realtimeSceneHeadings.value,
         jobId: pendingGenerationJobId.value,
+        seenEventKeys: Array.from(seenRealtimeEventKeys.value),
       } satisfies GenerationLogSnapshot),
     )
   } catch {
@@ -145,6 +147,7 @@ const restoreGenerationLog = () => {
     realtimePlans.value = snapshot.plans ?? []
     realtimeSceneHeadings.value = snapshot.sceneHeadings ?? []
     pendingGenerationJobId.value = snapshot.jobId
+    if (snapshot.seenEventKeys?.length) seenRealtimeEventKeys.value = new Set(snapshot.seenEventKeys)
   } catch {
     /* ignore corrupt data */
   }
