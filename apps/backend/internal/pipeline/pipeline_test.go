@@ -36,7 +36,7 @@ func TestCollectCharactersFromGraphUsesCanonicalIDs(t *testing.T) {
 }
 
 func TestValidatePlanGroundingRejectsUnknownCandidate(t *testing.T) {
-	plans := []*scene.ScenePlan{{ID: "plan_001", SourceNodeIDs: []string{"candidate_999"}, SceneCount: 1}}
+	plans := []*scene.ScenePlan{{ID: "plan_001", SourceCandidateIDs: []string{"candidate_999"}, SceneCount: 1}}
 	candidates := []scene.SceneCandidate{{ID: "candidate_001"}}
 	if err := validatePlanGrounding(plans, candidates); err == nil {
 		t.Fatalf("expected unknown candidate grounding error")
@@ -44,7 +44,7 @@ func TestValidatePlanGroundingRejectsUnknownCandidate(t *testing.T) {
 }
 
 func TestValidatePlanGroundingRequiresFullCoverage(t *testing.T) {
-	plans := []*scene.ScenePlan{{ID: "plan_001", SourceNodeIDs: []string{"candidate_001"}, SceneCount: 1}}
+	plans := []*scene.ScenePlan{{ID: "plan_001", SourceCandidateIDs: []string{"candidate_001"}, SceneCount: 1}}
 	candidates := []scene.SceneCandidate{{ID: "candidate_001"}, {ID: "candidate_002"}}
 	if err := validatePlanGrounding(plans, candidates); err == nil {
 		t.Fatalf("expected uncovered candidate grounding error")
@@ -52,9 +52,18 @@ func TestValidatePlanGroundingRequiresFullCoverage(t *testing.T) {
 }
 
 func TestValidatePlanGroundingAcceptsCoveredCandidates(t *testing.T) {
-	plans := []*scene.ScenePlan{{ID: "plan_001", SourceNodeIDs: []string{"candidate_001", "candidate_002"}, SceneCount: 1}}
+	plans := []*scene.ScenePlan{{ID: "plan_001", SourceCandidateIDs: []string{"candidate_001", "candidate_002"}, SceneCount: 1}}
 	candidates := []scene.SceneCandidate{{ID: "candidate_001"}, {ID: "candidate_002"}}
 	if err := validatePlanGrounding(plans, candidates); err != nil {
 		t.Fatalf("expected valid grounding, got %v", err)
+	}
+}
+
+func TestRequiredSourceChapterCoverageAllowsShortInputs(t *testing.T) {
+	cases := map[int]int{0: 0, 1: 1, 2: 2, 3: 3, 8: 3}
+	for chapters, want := range cases {
+		if got := requiredSourceChapterCoverage(chapters); got != want {
+			t.Fatalf("requiredSourceChapterCoverage(%d) = %d, want %d", chapters, got, want)
+		}
 	}
 }
