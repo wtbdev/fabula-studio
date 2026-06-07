@@ -515,50 +515,11 @@ const startGenerationPolling = () => {
   }
 }
 
-const sourceIndexChapterCount = computed(
-  () => generationArtifacts.value?.sourceIndex?.chapters?.length ?? 0,
-)
-
-const storyBeatCount = computed(() => generationArtifacts.value?.storyBeats?.length ?? 0)
-const scenePlanCount = computed(() => generationArtifacts.value?.scenePlan?.length ?? 0)
-
 const realtimeCharacterCount = computed(() => realtimeCharacters.value.length)
 const realtimeRelationCount = computed(() => realtimeRelations.value.length)
 const realtimePlanCount = computed(() => realtimePlans.value.length)
 const realtimeSceneHeadingCount = computed(() => realtimeSceneHeadings.value.length)
 
-const hasRealtimeGenerationArtifacts = computed(
-  () =>
-    realtimeEvents.value.length > 0 ||
-    realtimeCharacterCount.value > 0 ||
-    realtimeRelationCount.value > 0 ||
-    realtimePlanCount.value > 0 ||
-    realtimeSceneHeadingCount.value > 0 ||
-    Boolean(realtimeTraceId.value || realtimeRunId.value),
-)
-
-const hasGenerationArtifacts = computed(
-  () =>
-    hasRealtimeGenerationArtifacts.value ||
-    Boolean(generationArtifacts.value?.sourceIndex) ||
-    storyBeatCount.value > 0 ||
-    scenePlanCount.value > 0 ||
-    Boolean(generationArtifacts.value?.graphSnapshot) ||
-    Boolean(generationArtifacts.value?.warnings?.length),
-)
-
-const graphSnapshotItems = computed(() => {
-  const snapshot = generationArtifacts.value?.graphSnapshot
-  if (!snapshot) return []
-
-  return [
-    ['节点', snapshot.nodeCount],
-    ['边', snapshot.edgeCount],
-    ['角色', snapshot.characterCount],
-    ['关系', snapshot.relationshipCount],
-    ['更新时间', snapshot.updatedAt ? formatDate(snapshot.updatedAt) : undefined],
-  ].filter((item): item is [string, string | number] => item[1] !== undefined && item[1] !== null)
-})
 
 const projectConfigItems = computed(() => {
   const config = project.value?.config
@@ -1285,7 +1246,7 @@ watch(
               @click="extensionTab = 'artifacts'"
             >
               <n-icon><GitBranch /></n-icon>
-              生成产物
+              生成日志
             </button>
           </div>
 
@@ -1375,10 +1336,11 @@ watch(
 
             <section v-else-if="extensionTab === 'artifacts'" class="extension-card artifact-card">
               <span class="extension-icon"><n-icon><GitBranch /></n-icon></span>
-              <h2>生成产物</h2>
+              <h2>生成日志</h2>
 
-              <div v-if="hasGenerationArtifacts" class="artifact-stack">
-                <section v-if="hasRealtimeGenerationArtifacts" class="artifact-section realtime artifact-hero">
+              <div class="artifact-stack">
+                <!-- Live generation hero -->
+                <section v-if="generating" class="artifact-section realtime artifact-hero">
                   <div class="artifact-section-heading">
                     <div>
                       <h3>实时生成</h3>
@@ -1389,182 +1351,58 @@ watch(
                     </n-tag>
                   </div>
                   <div class="artifact-metric-grid">
-                    <div>
-                      <span>角色</span>
-                      <strong>{{ realtimeCharacterCount }}</strong>
-                    </div>
-                    <div>
-                      <span>关系</span>
-                      <strong>{{ realtimeRelationCount }}</strong>
-                    </div>
-                    <div>
-                      <span>计划</span>
-                      <strong>{{ realtimePlanCount }}</strong>
-                    </div>
-                    <div>
-                      <span>场景</span>
-                      <strong>{{ realtimeSceneHeadingCount }}</strong>
-                    </div>
+                    <div><span>角色</span><strong>{{ realtimeCharacterCount }}</strong></div>
+                    <div><span>关系</span><strong>{{ realtimeRelationCount }}</strong></div>
+                    <div><span>计划</span><strong>{{ realtimePlanCount }}</strong></div>
+                    <div><span>场景</span><strong>{{ realtimeSceneHeadingCount }}</strong></div>
                   </div>
                   <dl v-if="realtimeTraceId || realtimeRunId" class="config-grid artifact-graph-grid artifact-trace-grid">
-                    <div v-if="realtimeTraceId">
-                      <dt>Trace ID</dt>
-                      <dd>{{ realtimeTraceId }}</dd>
-                    </div>
-                    <div v-if="realtimeRunId">
-                      <dt>Run ID</dt>
-                      <dd>{{ realtimeRunId }}</dd>
-                    </div>
+                    <div v-if="realtimeTraceId"><dt>Trace ID</dt><dd>{{ realtimeTraceId }}</dd></div>
+                    <div v-if="realtimeRunId"><dt>Run ID</dt><dd>{{ realtimeRunId }}</dd></div>
                   </dl>
                   <n-button size="small" secondary type="primary" @click="handleOpenTrace">
-                    <template #icon>
-                      <n-icon><ExternalLink /></n-icon>
-                    </template>
+                    <template #icon><n-icon><ExternalLink /></n-icon></template>
                     进入解析 Trace 页
                   </n-button>
                 </section>
 
-                <section v-if="realtimeCharacters.length" class="artifact-section artifact-section-compact">
+                <!-- Completion status -->
+                <section v-if="generateStatus?.status === 'completed'" class="artifact-section">
                   <div class="artifact-section-heading">
-                    <h3>实时角色</h3>
-                    <n-tag size="small" :bordered="false" type="success">{{ realtimeCharacterCount }} 个</n-tag>
+                    <h3>生成完成</h3>
+                    <n-tag size="small" :bordered="false" type="success">已完成</n-tag>
                   </div>
-                  <div class="artifact-chip-cloud">
-                    <span v-for="character in realtimeCharacters" :key="character.name" class="artifact-chip">
-                      <strong>{{ character.name }}</strong>
-                      <small>{{ character.source }}</small>
-                    </span>
-                  </div>
+                  <p>剧本生成已完成，共 {{ scenes.length }} 场。</p>
                 </section>
 
-                <section v-if="realtimeRelations.length" class="artifact-section artifact-section-compact">
+                <!-- Failure status -->
+                <section v-if="generateStatus?.status === 'failed'" class="artifact-section warning">
                   <div class="artifact-section-heading">
-                    <h3>实时关系</h3>
-                    <n-tag size="small" :bordered="false" type="info">{{ realtimeRelationCount }} 条</n-tag>
+                    <h3>生成失败</h3>
+                    <n-tag size="small" :bordered="false" type="error">失败</n-tag>
                   </div>
-                  <div class="artifact-chip-cloud relation-cloud">
-                    <span v-for="relation in realtimeRelations" :key="relation.id" class="artifact-chip relation-chip">
-                      {{ relation.label }}
-                    </span>
-                  </div>
+                  <p>{{ generateStatus?.errorMessage || project?.errorMessage || '未知错误' }}</p>
                 </section>
 
-                <section v-if="realtimePlans.length" class="artifact-section">
-                  <div class="artifact-section-heading">
-                    <h3>实时场景规划</h3>
-                    <n-tag size="small" :bordered="false" type="warning">{{ realtimePlanCount }} 场</n-tag>
-                  </div>
-                  <ol class="artifact-timeline">
-                    <li v-for="plan in realtimePlans" :key="plan.id">
-                      <div>
-                        <strong>{{ plan.title }}</strong>
-                        <p>{{ plan.purpose }}</p>
-                        <span v-if="plan.location">{{ plan.location }}</span>
-                      </div>
-                    </li>
-                  </ol>
-                </section>
-
-                <section v-if="realtimeSceneHeadings.length" class="artifact-section artifact-section-compact">
-                  <div class="artifact-section-heading">
-                    <h3>实时场景标题</h3>
-                    <n-tag size="small" :bordered="false" type="success">{{ realtimeSceneHeadingCount }} 场</n-tag>
-                  </div>
-                  <ol class="artifact-list compact-list">
-                    <li v-for="scene in realtimeSceneHeadings" :key="scene.id">
-                      <strong>{{ scene.heading }}</strong>
-                    </li>
-                  </ol>
-                </section>
-
-
+                <!-- Event stream -->
                 <section v-if="realtimeEvents.length" class="artifact-section subtle-section">
                   <div class="artifact-section-heading">
                     <h3>事件流</h3>
-                    <n-tag size="small" :bordered="false">最近 8 条</n-tag>
+                    <n-tag size="small" :bordered="false">{{ realtimeEvents.length }} 条</n-tag>
                   </div>
                   <ul class="artifact-event-list">
-                    <li v-for="event in realtimeEvents.slice(0, 8)" :key="`${event.timestamp}-${event.type}-${event.step ?? ''}`">
+                    <li v-for="event in realtimeEvents" :key="`${event.timestamp}-${event.type}-${event.step ?? ''}`">
                       <span>{{ formatEventTimestamp(event.timestamp) }}</span>
                       <strong>{{ getEventLabel(event) }}</strong>
                     </li>
                   </ul>
                 </section>
 
-                <section v-if="generationArtifacts?.sourceIndex" class="artifact-section">
-                  <div class="artifact-section-heading">
-                    <h3>原文索引</h3>
-                    <n-tag size="small" :bordered="false" type="info">
-                      {{ sourceIndexChapterCount }} 章
-                    </n-tag>
-                  </div>
-                  <p>{{ generationArtifacts?.sourceIndex?.summary || '已接收原文索引，暂无摘要。' }}</p>
-                  <n-space v-if="generationArtifacts?.sourceIndex?.characterNames?.length" size="small">
-                    <n-tag
-                      v-for="character in generationArtifacts.sourceIndex.characterNames"
-                      :key="character"
-                      size="small"
-                      :bordered="false"
-                    >
-                      {{ character }}
-                    </n-tag>
-                  </n-space>
-                </section>
-
-                <section v-if="generationArtifacts?.storyBeats?.length" class="artifact-section">
-                  <div class="artifact-section-heading">
-                    <h3>故事节拍</h3>
-                    <n-tag size="small" :bordered="false" type="success">{{ storyBeatCount }} 条</n-tag>
-                  </div>
-                  <ol class="artifact-list compact-list">
-                    <li v-for="beat in generationArtifacts.storyBeats" :key="beat.id">
-                      <strong>{{ beat.title || `节拍 ${beat.order ?? beat.id}` }}</strong>
-                      <p>{{ beat.summary }}</p>
-                    </li>
-                  </ol>
-                </section>
-
-                <section v-if="generationArtifacts?.scenePlan?.length" class="artifact-section">
-                  <div class="artifact-section-heading">
-                    <h3>场景规划</h3>
-                    <n-tag size="small" :bordered="false" type="warning">{{ scenePlanCount }} 场</n-tag>
-                  </div>
-                  <ol class="artifact-list compact-list">
-                    <li v-for="plan in generationArtifacts.scenePlan" :key="plan.id">
-                      <strong>{{ plan.title || `场景 ${plan.sceneNo ?? plan.id}` }}</strong>
-                      <p>{{ plan.purpose || '该场景计划未提供目的说明。' }}</p>
-                    </li>
-                  </ol>
-                </section>
-
-                <section v-if="generationArtifacts?.warnings?.length" class="artifact-section warning">
-                  <div class="artifact-section-heading">
-                    <h3>校验警告</h3>
-                    <n-tag size="small" :bordered="false" type="error">
-                      {{ generationArtifacts.warnings.length }} 条
-                    </n-tag>
-                  </div>
-                  <ul class="artifact-warning-list">
-                    <li v-for="warning in generationArtifacts.warnings" :key="warning">{{ warning }}</li>
-                  </ul>
-                </section>
-
-                <section v-if="generationArtifacts?.graphSnapshot" class="artifact-section">
-                  <div class="artifact-section-heading">
-                    <h3>图谱快照</h3>
-                    <n-tag size="small" :bordered="false" type="info">GraphAfter</n-tag>
-                  </div>
-                  <p>{{ generationArtifacts.graphSnapshot.summary || '图谱快照已更新。' }}</p>
-                  <dl v-if="graphSnapshotItems.length" class="config-grid artifact-graph-grid">
-                    <div v-for="[label, value] in graphSnapshotItems" :key="label">
-                      <dt>{{ label }}</dt>
-                      <dd>{{ value }}</dd>
-                    </div>
-                  </dl>
-                </section>
+                <n-empty
+                  v-if="!generating && generateStatus?.status !== 'completed' && generateStatus?.status !== 'failed' && !realtimeEvents.length"
+                  description="暂无生成日志。"
+                />
               </div>
-
-              <n-empty v-else description="当前生成接口尚未返回结构化产物。" />
             </section>
 
           </div>
