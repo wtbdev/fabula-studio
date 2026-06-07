@@ -399,70 +399,81 @@ func (p *Pipeline) Convert(ctx context.Context, title, author string, chapters [
 	p.status.Progress = 80
 	p.mu.Unlock()
 
-	// Assemble screenplay
-	finalGraph := state.finalGraph()
-	genre := []string{"剧情"}
-	sourceChapters := make([]int, len(state.Chapters))
-	for i := range state.Chapters {
-		sourceChapters[i] = i + 1
-	}
-
-	state.Screenplay = &schema.Screenplay{
-		Metadata: schema.Metadata{
-			Title:          state.Title,
-			Author:         state.Author,
-			Version:        "1.0",
-			CreatedAt:      time.Now().Format(time.RFC3339),
-			OriginalNovel:  state.Title,
-			Genre:          genre,
-			SourceChapters: sourceChapters,
-		},
-		Characters: collectCharactersFromGraph(finalGraph),
-		Scenes:     state.Scenes,
-	}
-
-	var priorWarnings []schema.GenerationWarning
-	if state.Artifacts != nil {
-		priorWarnings = append([]schema.GenerationWarning(nil), state.Artifacts.Warnings...)
-	}
-	state.Artifacts = generationArtifacts(state.SourceIndex, state.StoryBeats, state.SceneCandidates, state.Plans, finalGraph)
-	if len(priorWarnings) > 0 {
-		if state.Artifacts == nil {
-			state.Artifacts = &schema.GenerationArtifacts{}
+	// Assemble screenplay + editor review loop
+	// If the editor finds issues, re-assemble with the issues fed back as warnings
+	// and re-review (up to 3 passes).
+	assembleScreenplay := func() {
+		finalGraph := state.finalGraph()
+		genre := []string{"剧情"}
+		sourceChapters := make([]int, len(state.Chapters))
+		for i := range state.Chapters {
+			sourceChapters[i] = i + 1
 		}
-		state.Artifacts.Warnings = append(priorWarnings, state.Artifacts.Warnings...)
-	}
 
-	// Step 12: Chief editor review
-	stepStart = time.Now()
-	ctx, editorSpan := p.tracer.Start(ctx, "pipeline.editor_review")
-	setPipelineStepAttributes(editorSpan, "editor_review", 80)
-	p.publishEvent(observability.PipelineEvent{
-		Type:    observability.EventEditorReviewing,
-		Step:    "editor_review",
-		Message: "步骤 5/6: 总编审查...",
-	})
-	editResult, err := p.chiefEditor.ReviewAndRevise(ctx, state.Screenplay, state.Artifacts)
-	if err != nil {
-		editorSpan.RecordError(err)
+		state.Screenplay = &schema.Screenplay{
+			Metadata: schema.Metadata{
+				Title:          state.Title,
+				Author:         state.Author,
+				Version:        "1.0",
+				CreatedAt:      time.Now().Format(time.RFC3339),
+				OriginalNovel:  state.Title,
+				Genre:          genre,
+				SourceChapters: sourceChapters,
+			},
+			Characters: collectCharactersFromGraph(finalGraph),
+			Scenes:     state.Scenes,
+		}
+
+		var priorWarnings []schema.GenerationWarning
 		if state.Artifacts != nil {
-			state.Artifacts.Warnings = append(state.Artifacts.Warnings, schema.GenerationWarning{
-				Code:    "editor_review_failed",
-				Message: err.Error(),
-				Source:  "chief-editor",
-			})
+			priorWarnings = append([]schema.GenerationWarning(nil), state.Artifacts.Warnings...)
 		}
+		state.Artifacts = generationArtifacts(state.SourceIndex, state.StoryBeats, state.SceneCandidates, state.Plans, finalGraph)
+		if len(priorWarnings) > 0 {
+			if state.Artifacts == nil {
+				state.Artifacts = &schema.GenerationArtifacts{}
+			}
+			state.Artifacts.Warnings = append(priorWarnings, state.Artifacts.Warnings...)
+		}
+	}
+
+	assembleScreenplay()
+
+	const maxEditorPasses = 3
+	for editorPass := 0; editorPass < maxEditorPasses; editorPass++ {
+		stepStart := time.Now()
+		ctx, editorSpan := p.tracer.Start(ctx, "pipeline.editor_review")
+		setPipelineStepAttributes(editorSpan, "editor_review", 80)
 		p.publishEvent(observability.PipelineEvent{
-			Type:    observability.EventEditorReviewed,
+			Type:    observability.EventEditorReviewing,
 			Step:    "editor_review",
-			Message: fmt.Sprintf("总编审查失败，保留原剧本: %v", err),
-			Error:   err.Error(),
+			Message: fmt.Sprintf("步骤 5/6: 总编审查 (第 %d 轮)...", editorPass+1),
 		})
-	} else {
+
+		editResult, err := p.chiefEditor.ReviewAndRevise(ctx, state.Screenplay, state.Artifacts)
+		if err != nil {
+			editorSpan.RecordError(err)
+			if state.Artifacts != nil {
+				state.Artifacts.Warnings = append(state.Artifacts.Warnings, schema.GenerationWarning{
+					Code:    "editor_review_failed",
+					Message: err.Error(),
+					Source:  "chief-editor",
+				})
+			}
+			p.publishEvent(observability.PipelineEvent{
+				Type:    observability.EventEditorReviewed,
+				Step:    "editor_review",
+				Message: fmt.Sprintf("总编审查失败，保留原剧本: %v", err),
+				Error:   err.Error(),
+			})
+			editorSpan.End()
+			break
+		}
+
 		p.publishEvent(observability.PipelineEvent{
 			Type:     observability.EventEditorReviewed,
 			Step:     "editor_review",
-			Message:  fmt.Sprintf("总编审查完成: 发现 %d 个问题", len(editResult.Issues)),
+			Message:  fmt.Sprintf("总编审查完成 (第 %d 轮): 发现 %d 个问题", editorPass+1, len(editResult.Issues)),
 			Duration: durationPtr(time.Since(stepStart)),
 			Details: map[string]interface{}{
 				"issues_count":  len(editResult.Issues),
@@ -471,8 +482,22 @@ func (p *Pipeline) Convert(ctx context.Context, title, author string, chapters [
 				"changes":       editResult.Changes,
 			},
 		})
+		editorSpan.End()
+
+		if len(editResult.Issues) == 0 {
+			break
+		}
+
+		// Feed issues back as warnings and re-assemble
+		for _, issue := range editResult.Issues {
+			state.Artifacts.Warnings = append(state.Artifacts.Warnings, schema.GenerationWarning{
+				Code:    "editor_review_issue",
+				Message: issue,
+				Source:  "chief-editor",
+			})
+		}
+		assembleScreenplay()
 	}
-	editorSpan.End()
 
 	p.mu.Lock()
 	p.status.CurrentStep = "validation"
