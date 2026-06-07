@@ -89,11 +89,53 @@ type editorChange struct {
 }
 
 // editorOutput is the JSON structure returned by the editor agent.
+// We decode issues/changes as RawMessage to handle both string and object shapes.
 type editorOutput struct {
-	Issues  []editorIssue  `json:"issues"`
-	Changes []editorChange `json:"changes"`
+	Issues  json.RawMessage `json:"issues"`
+	Changes json.RawMessage `json:"changes"`
 }
-
+// decodeIssues converts issues raw json into []editorIssue, accepting both
+// plain strings and objects.
+func decodeIssues(raw json.RawMessage) []editorIssue {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	// Try objects first
+	var objs []editorIssue
+	if err := json.Unmarshal(raw, &objs); err == nil {
+		return objs
+	}
+	// Fall back: plain strings
+	var strs []string
+	if err := json.Unmarshal(raw, &strs); err != nil {
+		// Return as a single issue with the raw string
+		return []editorIssue{{Description: string(raw)}}
+	}
+	issues := make([]editorIssue, len(strs))
+	for i, s := range strs {
+		issues[i] = editorIssue{Description: s}
+	}
+	return issues
+}
+// decodeChanges converts changes raw json into []editorChange.
+func decodeChanges(raw json.RawMessage) []editorChange {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	var objs []editorChange
+	if err := json.Unmarshal(raw, &objs); err == nil {
+		return objs
+	}
+	var strs []string
+	if err := json.Unmarshal(raw, &strs); err != nil {
+		return []editorChange{{Description: string(raw)}}
+	}
+	changes := make([]editorChange, len(strs))
+	for i, s := range strs {
+		changes[i] = editorChange{Description: s}
+	}
+	return changes
+}
 // ReviewAndRevise reviews the complete screenplay and returns findings only.
 func (a *ChiefEditorAgent) ReviewAndRevise(ctx context.Context, sp *schema.Screenplay, artifacts *schema.GenerationArtifacts) (*EditResult, error) {
 	spYAML, err := yaml.Marshal(sp)
@@ -104,7 +146,6 @@ func (a *ChiefEditorAgent) ReviewAndRevise(ctx context.Context, sp *schema.Scree
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal generation artifacts: %w", err)
 	}
-
 	prompt := fmt.Sprintf("Review this screenplay using the generation artifacts as source grounding. Return only review issues and recommended changes; do not return a replacement screenplay.\n\nGeneration artifacts:\n```json\n%s\n```\n\nScreenplay:\n```yaml\n%s\n```", string(artifactsJSON), string(spYAML))
 
 	raw, err := Run(ctx, a.agent, prompt)
@@ -123,8 +164,8 @@ func (a *ChiefEditorAgent) ReviewAndRevise(ctx context.Context, sp *schema.Scree
 	}
 
 	result := &EditResult{
-		Issues:  output.Issues,
-		Changes: output.Changes,
+		Issues:  decodeIssues(output.Issues),
+		Changes: decodeChanges(output.Changes),
 	}
 
 	return result, nil
