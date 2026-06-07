@@ -93,6 +93,63 @@ const seenRealtimeEventKeys = ref<Set<string>>(new Set())
 const realtimeCurrentStep = ref<string | null>(null)
 const pendingGenerationJobId = ref<string | null>(null)
 let generationPollingTimer: number | null = null
+
+const GEN_LOG_KEY = 'fabula-gen-log'
+
+interface GenerationLogSnapshot {
+  events: PipelineEventDTO[]
+  traceId: string | null
+  runId: string | null
+  progress: number | null
+  currentStep: string | null
+  characters: RealtimeCharacter[]
+  relations: RealtimeRelation[]
+  plans: RealtimePlan[]
+  sceneHeadings: RealtimeSceneHeading[]
+  jobId: string | null
+}
+
+const saveGenerationLog = () => {
+  try {
+    sessionStorage.setItem(
+      GEN_LOG_KEY,
+      JSON.stringify({
+        events: realtimeEvents.value,
+        traceId: realtimeTraceId.value,
+        runId: realtimeRunId.value,
+        progress: realtimeProgress.value,
+        currentStep: realtimeCurrentStep.value,
+        characters: realtimeCharacters.value,
+        relations: realtimeRelations.value,
+        plans: realtimePlans.value,
+        sceneHeadings: realtimeSceneHeadings.value,
+        jobId: pendingGenerationJobId.value,
+      } satisfies GenerationLogSnapshot),
+    )
+  } catch {
+    /* ignore quota errors */
+  }
+}
+
+const restoreGenerationLog = () => {
+  try {
+    const raw = sessionStorage.getItem(GEN_LOG_KEY)
+    if (!raw) return
+    const snapshot = JSON.parse(raw) as GenerationLogSnapshot
+    realtimeEvents.value = snapshot.events ?? []
+    realtimeTraceId.value = snapshot.traceId
+    realtimeRunId.value = snapshot.runId
+    realtimeProgress.value = snapshot.progress
+    realtimeCurrentStep.value = snapshot.currentStep
+    realtimeCharacters.value = snapshot.characters ?? []
+    realtimeRelations.value = snapshot.relations ?? []
+    realtimePlans.value = snapshot.plans ?? []
+    realtimeSceneHeadings.value = snapshot.sceneHeadings ?? []
+    pendingGenerationJobId.value = snapshot.jobId
+  } catch {
+    /* ignore corrupt data */
+  }
+}
 let pollingGenerationStatus = false
 let generationEventSource: EventSource | null = null
 
@@ -364,6 +421,7 @@ const applyPipelineEvent = (event: PipelineEventDTO) => {
     const headings = collectRealtimeSceneHeadings(details)
     if (headings.length) realtimeSceneHeadings.value = headings
   }
+  saveGenerationLog()
 }
 
 const getEventStreamURL = () => {
@@ -881,6 +939,7 @@ onMounted(async () => {
   loading.value = true
   await Promise.all([loadProject(), loadScenes()])
   loading.value = false
+  restoreGenerationLog()
 })
 
 onUnmounted(() => {
@@ -1239,7 +1298,7 @@ watch(
 
               <div class="artifact-stack">
                 <!-- Live generation hero -->
-                <section v-if="generating" class="artifact-section realtime artifact-hero">
+                <section v-if="generating || realtimeTraceId || realtimeRunId || realtimeEvents.length > 0 || realtimeCharacterCount > 0 || realtimeRelationCount > 0 || realtimePlanCount > 0 || realtimeSceneHeadingCount > 0" class="artifact-section realtime artifact-hero">
                   <div class="artifact-section-heading">
                     <div>
                       <h3>实时生成</h3>
@@ -1250,10 +1309,10 @@ watch(
                     </n-tag>
                   </div>
                   <div class="artifact-metric-grid">
-                    <div><span>角色</span><strong>{{ realtimeCharacterCount }}</strong></div>
-                    <div><span>关系</span><strong>{{ realtimeRelationCount }}</strong></div>
-                    <div><span>计划</span><strong>{{ realtimePlanCount }}</strong></div>
-                    <div><span>场景</span><strong>{{ realtimeSceneHeadingCount }}</strong></div>
+                    <div v-if="realtimeCharacterCount > 0"><span>角色</span><strong>{{ realtimeCharacterCount }}</strong></div>
+                    <div v-if="realtimeRelationCount > 0"><span>关系</span><strong>{{ realtimeRelationCount }}</strong></div>
+                    <div v-if="realtimePlanCount > 0"><span>计划</span><strong>{{ realtimePlanCount }}</strong></div>
+                    <div v-if="realtimeSceneHeadingCount > 0"><span>场景</span><strong>{{ realtimeSceneHeadingCount }}</strong></div>
                   </div>
                   <dl v-if="realtimeTraceId || realtimeRunId" class="config-grid artifact-graph-grid artifact-trace-grid">
                     <div v-if="realtimeTraceId"><dt>Trace ID</dt><dd>{{ realtimeTraceId }}</dd></div>
