@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useMessage } from 'naive-ui'
 import {
   ArrowLeft,
+  Check,
   BookOpenText,
   Clock,
   Download,
@@ -18,7 +19,6 @@ import {
   Save,
   Settings,
   UserRound,
-  WandSparkles,
 } from 'lucide-vue-next'
 import { type ExportFormat, exportFormats, downloadExport } from '../utils/export'
 import { generationApi } from '../api/generation'
@@ -1052,29 +1052,28 @@ watch(
             </template>
             重新生成本场
           </n-button>
-          <n-popconfirm
-            v-if="activeMode === 'script'"
-            positive-text="开始生成"
-            negative-text="取消"
-            :show-icon="false"
-            @positive-click="handleGenerateProject"
-          >
-            <template #trigger>
-              <n-button
-                size="small"
-                secondary
-                type="primary"
-                :loading="generating"
-                :disabled="isWorkbenchLocked || !project?.sourceText"
-              >
-                <template #icon>
-                  <n-icon><WandSparkles /></n-icon>
-                </template>
-                增量生成
-              </n-button>
-            </template>
-            将基于当前剧本继续生成场次并同步人物关系，期间编辑器会暂时锁定，消耗 1 AI 点数。
-          </n-popconfirm>
+          <!-- Generation status -->
+          <template v-if="activeMode === 'script'">
+            <n-button
+              v-if="generating"
+              size="small"
+              secondary
+              type="primary"
+              loading
+              disabled
+            >
+              <template #icon>
+                <n-icon><RefreshCw /></n-icon>
+              </template>
+              正在生成
+            </n-button>
+            <n-tag v-else-if="project?.status === 'completed'" :bordered="false" type="success" size="small">
+              <template #icon>
+                <n-icon><Check /></n-icon>
+              </template>
+              已生成
+            </n-tag>
+          </template>
           <n-button size="small" secondary type="primary" @click="handleOpenTrace">
             <template #icon>
               <n-icon><ExternalLink /></n-icon>
@@ -1191,33 +1190,6 @@ watch(
                   <dd>{{ value }}</dd>
                 </div>
               </dl>
-            </section>
-
-            <section class="settings-section danger">
-              <div class="settings-section-title">
-                <h3>增量生成剧本</h3>
-                <n-tag :bordered="false" type="warning">消耗 1 点</n-tag>
-              </div>
-              <p>该操作会调用现有生成接口，基于当前剧本继续补充场次，并同步人物关系等生成结果。</p>
-              <n-popconfirm
-                positive-text="开始生成"
-                negative-text="取消"
-                @positive-click="handleGenerateProject"
-              >
-                <template #trigger>
-                  <n-button
-                    type="warning"
-                    :loading="generating"
-                    :disabled="isWorkbenchLocked || !project?.sourceText"
-                  >
-                    <template #icon>
-                      <n-icon><WandSparkles /></n-icon>
-                    </template>
-                    增量生成
-                  </n-button>
-                </template>
-                将基于当前剧本继续生成，并消耗 1 AI 点数。生成完成前编辑器会暂时锁定。
-              </n-popconfirm>
             </section>
           </section>
         </section>
