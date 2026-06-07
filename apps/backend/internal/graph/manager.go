@@ -19,6 +19,16 @@ func (m *Manager) SetInitialSnapshot(nodeID string, snap *GraphSnapshot) {
 	m.snapshotsBefore[nodeID] = snap
 }
 
+// SetAfterSnapshot stores the graph snapshot after a node, plan, or generated scene boundary.
+func (m *Manager) SetAfterSnapshot(nodeID string, snap *GraphSnapshot) {
+	if snap == nil {
+		return
+	}
+	stored := snap.Clone()
+	stored.NodeID = nodeID
+	m.snapshotsAfter[nodeID] = stored
+}
+
 // ApplyUpdate produces the "after" snapshot for a node by applying the update result.
 func (m *Manager) ApplyUpdate(nodeID string, update *GraphUpdateResult) *GraphSnapshot {
 	before := m.snapshotsBefore[nodeID]

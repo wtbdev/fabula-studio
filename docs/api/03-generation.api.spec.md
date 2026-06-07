@@ -95,10 +95,47 @@ MVP 阶段不需要额外参数，直接使用项目中已保存的 `sourceText`
         "createdAt": "2026-06-06T10:10:00.000Z",
         "updatedAt": "2026-06-06T10:10:00.000Z"
       }
-    ]
+    ],
+    "artifacts": {
+      "sourceIndex": {
+        "sentences": [
+          {
+            "id": "s_000001",
+            "index": 1,
+            "chapter": 1,
+            "chapterIndex": 1,
+            "text": "雨水敲打着玻璃。"
+          }
+        ]
+      },
+      "storyBeats": [
+        {
+          "id": "beat_001",
+          "sequence": 1,
+          "summary": "林舟与许晚在雨夜重逢。",
+          "sourceRefs": [{ "sentenceId": "s_000001", "startIndex": 1, "endIndex": 1 }]
+        }
+      ],
+      "scenePlan": {
+        "id": "scene_plan",
+        "scenes": [
+          {
+            "id": "plan_001",
+            "sequence": 1,
+            "purpose": "建立重逢冲突",
+            "location": "旧车站",
+            "timeFrame": "夜晚",
+            "characters": ["林舟", "许晚"]
+          }
+        ]
+      },
+      "warnings": []
+    }
   }
 }
 ```
+
+`artifacts` 为只读生成过程产物；当前不要求持久化，客户端必须按可选字段处理。
 
 ### Error Responses
 
@@ -142,10 +179,13 @@ GET /api/projects/{projectId}/generate/status
     "projectId": "project_001",
     "status": "generating",
     "progress": 60,
-    "currentStep": "正在拆分剧本场次"
+    "currentStep": "正在拆分剧本场次",
+    "artifacts": null
   }
 }
 ```
+
+`artifacts` 字段可选；仅当当前后端进程仍保留最近一次生成结果时返回。
 
 ### MVP 说明
 

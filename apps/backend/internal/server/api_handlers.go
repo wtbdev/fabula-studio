@@ -340,7 +340,7 @@ func (s *Server) handleGenerateStatus(w http.ResponseWriter, r *http.Request, us
 	if p.Status == "failed" {
 		step = "生成失败"
 	}
-	writeAPISuccess(w, "success", generationStatusDTO{ProjectID: projectID, Status: p.Status, Progress: progress, CurrentStep: step})
+	writeAPISuccess(w, "success", generationStatusDTO{ProjectID: projectID, Status: p.Status, Progress: progress, CurrentStep: step, Artifacts: generationArtifactsFromPipeline(s.pipeline.Result())})
 }
 
 func (s *Server) handleGenerate(w http.ResponseWriter, r *http.Request, userID, projectID string) {
@@ -363,7 +363,9 @@ func (s *Server) handleGenerate(w http.ResponseWriter, r *http.Request, userID, 
 		return
 	}
 	_, _ = s.store.Queries.UpdateProjectStatus(r.Context(), sqlc.UpdateProjectStatusParams{ID: projectID, UserID: userID, Status: "generating"})
-	sp, err := s.pipeline.Convert(r.Context(), p.Title, u.Nickname, splitChapters(p.SourceText))
+	profile := adaptationProfileFromConfigJSON(p.ConfigJson)
+	ctx := schema.WithAdaptationProfile(r.Context(), &profile)
+	sp, err := s.pipeline.Convert(ctx, p.Title, u.Nickname, splitChapters(p.SourceText))
 	if err != nil {
 		s.markGenerationFailed(r.Context(), projectID, userID, err.Error())
 		writeAPIError(w, http.StatusInternalServerError, codeAIFailed, "AI 生成失败")
@@ -404,7 +406,7 @@ func (s *Server) handleGenerate(w http.ResponseWriter, r *http.Request, userID, 
 	for _, sc := range saved {
 		items = append(items, sceneToDTO(sc, true))
 	}
-	writeAPISuccess(w, "剧本生成成功", generationResponse{ProjectID: projectID, Status: "completed", CostPoints: generationCost, RemainingPoints: remaining, Scenes: items})
+	writeAPISuccess(w, "剧本生成成功", generationResponse{ProjectID: projectID, Status: "completed", CostPoints: generationCost, RemainingPoints: remaining, Scenes: items, Artifacts: generationArtifactsFromPipeline(s.pipeline.Result())})
 }
 
 func (s *Server) markGenerationFailed(ctx context.Context, projectID, userID, msg string) {

@@ -60,7 +60,7 @@ func NewGraphAnalyzerAgent(modelName, apiKey, baseURL string) *GraphAnalyzerAgen
 	// Combine validation tool with graph tools
 	graphTools := fabulatool.NewGraphTools()
 	allTools := make([]tool.Tool, 0, len(graphTools)+1)
-	
+
 	allTools = append(allTools, graphTools...)
 
 	agt := llmagent.New("graph-analyzer",
@@ -101,6 +101,15 @@ func (a *GraphAnalyzerAgent) AnalyzeUpdate(ctx context.Context, nodeText string,
 	logChanges(result)
 
 	return result, nil
+}
+
+// AnalyzeSceneUpdate updates the graph from the screenplay scene that was actually generated.
+func (a *GraphAnalyzerAgent) AnalyzeSceneUpdate(ctx context.Context, generatedScene interface{}, currentSnapshot *graph.GraphSnapshot) (*graph.GraphUpdateResult, error) {
+	sceneJSON, err := json.Marshal(generatedScene)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal generated scene for graph update: %w", err)
+	}
+	return a.AnalyzeUpdate(ctx, string(sceneJSON), currentSnapshot)
 }
 
 // diffSnapshots computes the difference between the original and modified snapshots.

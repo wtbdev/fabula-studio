@@ -168,6 +168,9 @@ func (s *Server) handleConvert(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithTimeout(r.Context(), 600*time.Second)
 	defer cancel()
+	if req.AdaptationProfile != nil {
+		ctx = schema.WithAdaptationProfile(ctx, req.AdaptationProfile)
+	}
 
 	scr, err := s.pipeline.Convert(ctx, req.Title, req.Author, req.Chapters)
 	if err != nil {

@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/fabula-studio/backend/internal/db/sqlc"
+	"github.com/fabula-studio/backend/internal/pipeline"
+	"github.com/fabula-studio/backend/internal/schema"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -79,9 +81,9 @@ func userToDTO(u sqlc.User) userDTO {
 }
 
 func projectToDTO(p sqlc.Project, includeSource bool, sceneCount *int32) projectDTO {
-	var cfg adaptConfig
-	_ = json.Unmarshal([]byte(p.ConfigJson), &cfg)
-	dto := projectDTO{ID: p.ID, UserID: p.UserID, Title: p.Title, NovelTitle: textPtr(p.NovelTitle), Config: cfg, Status: p.Status, ErrorMessage: textPtr(p.ErrorMessage), SceneCount: sceneCount, CreatedAt: timestamp(p.CreatedAt), UpdatedAt: timestamp(p.UpdatedAt)}
+	cfg := parseAdaptConfig(p.ConfigJson)
+	profile := adaptationProfileFromConfig(cfg)
+	dto := projectDTO{ID: p.ID, UserID: p.UserID, Title: p.Title, NovelTitle: textPtr(p.NovelTitle), Config: cfg, AdaptationProfile: &profile, Status: p.Status, ErrorMessage: textPtr(p.ErrorMessage), SceneCount: sceneCount, CreatedAt: timestamp(p.CreatedAt), UpdatedAt: timestamp(p.UpdatedAt)}
 	if includeSource {
 		dto.SourceText = &p.SourceText
 	}
@@ -90,9 +92,30 @@ func projectToDTO(p sqlc.Project, includeSource bool, sceneCount *int32) project
 
 func projectRowToDTO(p sqlc.ListProjectsRow) projectDTO {
 	count := p.SceneCount
+	cfg := parseAdaptConfig(p.ConfigJson)
+	profile := adaptationProfileFromConfig(cfg)
+	return projectDTO{ID: p.ID, Title: p.Title, NovelTitle: textPtr(p.NovelTitle), Config: cfg, AdaptationProfile: &profile, Status: p.Status, ErrorMessage: textPtr(p.ErrorMessage), SceneCount: &count, CreatedAt: timestamp(p.CreatedAt), UpdatedAt: timestamp(p.UpdatedAt)}
+}
+
+func parseAdaptConfig(raw string) adaptConfig {
 	var cfg adaptConfig
-	_ = json.Unmarshal([]byte(p.ConfigJson), &cfg)
-	return projectDTO{ID: p.ID, Title: p.Title, NovelTitle: textPtr(p.NovelTitle), Config: cfg, Status: p.Status, ErrorMessage: textPtr(p.ErrorMessage), SceneCount: &count, CreatedAt: timestamp(p.CreatedAt), UpdatedAt: timestamp(p.UpdatedAt)}
+	_ = json.Unmarshal([]byte(raw), &cfg)
+	return cfg
+}
+
+func adaptationProfileFromConfig(cfg adaptConfig) schema.AdaptationProfile {
+	return schema.AdaptationProfile{Style: strings.TrimSpace(cfg.Style), DialogueLevel: strings.TrimSpace(cfg.DialogueLevel), AdaptationMode: strings.TrimSpace(cfg.AdaptationMode), SceneGranularity: strings.TrimSpace(cfg.SceneGranularity), NarrationLevel: strings.TrimSpace(cfg.NarrationLevel), CustomGuidance: strings.TrimSpace(cfg.CustomPrompt)}
+}
+
+func adaptationProfileFromConfigJSON(raw string) schema.AdaptationProfile {
+	return adaptationProfileFromConfig(parseAdaptConfig(raw))
+}
+
+func generationArtifactsFromPipeline(result *pipeline.PipelineResult) *schema.GenerationArtifacts {
+	if result == nil {
+		return nil
+	}
+	return result.Artifacts
 }
 
 func sceneToDTO(s sqlc.Scene, includeRaw bool) sceneDTO {

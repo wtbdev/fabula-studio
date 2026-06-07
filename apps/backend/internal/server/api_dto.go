@@ -1,6 +1,10 @@
 package server
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"github.com/fabula-studio/backend/internal/schema"
+)
 
 type apiResponse[T any] struct {
 	Code    int    `json:"code"`
@@ -39,17 +43,19 @@ type adaptConfig struct {
 }
 
 type projectDTO struct {
-	ID           string      `json:"id"`
-	UserID       string      `json:"userId,omitempty"`
-	Title        string      `json:"title"`
-	NovelTitle   *string     `json:"novelTitle,omitempty"`
-	SourceText   *string     `json:"sourceText,omitempty"`
-	Config       adaptConfig `json:"config,omitempty"`
-	Status       string      `json:"status"`
-	ErrorMessage *string     `json:"errorMessage,omitempty"`
-	SceneCount   *int32      `json:"sceneCount,omitempty"`
-	CreatedAt    string      `json:"createdAt"`
-	UpdatedAt    string      `json:"updatedAt"`
+	ID                string                      `json:"id"`
+	UserID            string                      `json:"userId,omitempty"`
+	Title             string                      `json:"title"`
+	NovelTitle        *string                     `json:"novelTitle,omitempty"`
+	SourceText        *string                     `json:"sourceText,omitempty"`
+	Config            adaptConfig                 `json:"config,omitempty"`
+	AdaptationProfile *schema.AdaptationProfile   `json:"adaptationProfile,omitempty"`
+	Artifacts         *schema.GenerationArtifacts `json:"artifacts,omitempty"`
+	Status            string                      `json:"status"`
+	ErrorMessage      *string                     `json:"errorMessage,omitempty"`
+	SceneCount        *int32                      `json:"sceneCount,omitempty"`
+	CreatedAt         string                      `json:"createdAt"`
+	UpdatedAt         string                      `json:"updatedAt"`
 }
 
 type scriptBlock struct {
@@ -110,16 +116,18 @@ type updateSceneRequest struct {
 }
 
 type generationResponse struct {
-	ProjectID       string     `json:"projectId"`
-	Status          string     `json:"status"`
-	CostPoints      int32      `json:"costPoints"`
-	RemainingPoints int32      `json:"remainingPoints"`
-	Scenes          []sceneDTO `json:"scenes"`
+	ProjectID       string                      `json:"projectId"`
+	Status          string                      `json:"status"`
+	CostPoints      int32                       `json:"costPoints"`
+	RemainingPoints int32                       `json:"remainingPoints"`
+	Scenes          []sceneDTO                  `json:"scenes"`
+	Artifacts       *schema.GenerationArtifacts `json:"artifacts,omitempty"`
 }
 
 type generationStatusDTO struct {
-	ProjectID   string `json:"projectId"`
-	Status      string `json:"status"`
-	Progress    int    `json:"progress"`
-	CurrentStep string `json:"currentStep"`
+	ProjectID   string                      `json:"projectId"`
+	Status      string                      `json:"status"`
+	Progress    int                         `json:"progress"`
+	CurrentStep string                      `json:"currentStep"`
+	Artifacts   *schema.GenerationArtifacts `json:"artifacts,omitempty"`
 }
