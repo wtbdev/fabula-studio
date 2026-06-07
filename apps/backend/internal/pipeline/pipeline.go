@@ -262,71 +262,14 @@ func (p *Pipeline) Convert(ctx context.Context, title, author string, chapters [
 		},
 	})
 
-	p.mu.Lock()
-	p.status.CurrentStep = "update_graph"
-	p.status.Progress = 40
-	p.mu.Unlock()
-
-	stepStart = time.Now()
-	ctx, graphSpan := p.tracer.Start(ctx, "pipeline.update_graph")
-	setPipelineStepAttributes(graphSpan, "update_graph", 40)
-	p.publishEvent(observability.PipelineEvent{
-		Type:    observability.EventGraphUpdating,
-		Step:    "update_graph",
-		Message: "步骤 2/6: 更新动态图...",
-	})
-	// Step 2: Update the dynamic graph on the same source-grounded timeline used for scene planning.
 	state.SceneCandidates = scene.BuildSceneCandidates(state.StoryBeats)
 	if len(state.SceneCandidates) == 0 {
-		graphSpan.End()
-		p.mu.Lock()
-		p.status.State = "failed"
-		p.status.Error = "no scene candidates produced"
-		p.mu.Unlock()
-		p.publishEvent(observability.PipelineEvent{
-			Type:  observability.EventError,
-			Step:  "update_graph",
-			Error: "no scene candidates produced",
-		})
-		return nil, fmt.Errorf("graph update failed: no scene candidates produced")
+		return nil, fmt.Errorf("no scene candidates produced from story beats")
 	}
-	state.GraphMgr, err = p.updateGraphFromCandidates(ctx, state.SourceIndex, state.SceneCandidates)
-	if err != nil {
-		graphSpan.RecordError(err)
-		state.GraphMgr = emptyGraphManager(state.SceneCandidates)
-		if state.Artifacts == nil {
-			state.Artifacts = &schema.GenerationArtifacts{}
-		}
-		state.Artifacts.Warnings = append(state.Artifacts.Warnings, schema.GenerationWarning{
-			Code:    "source_graph_failed",
-			Message: err.Error(),
-			Source:  "graph-analyzer",
-		})
-		p.publishEvent(observability.PipelineEvent{
-			Type:    observability.EventGraphUpdated,
-			Step:    "update_graph",
-			Message: "源文本图谱更新失败，降级为空图继续生成",
-			Error:   err.Error(),
-		})
-	}
-	graphSpan.End()
-	graphChars := 0
-	if afterSnap := state.finalGraph(); afterSnap != nil {
-		graphChars = len(afterSnap.Characters)
-	}
-	p.publishEvent(observability.PipelineEvent{
-		Type:     observability.EventGraphUpdated,
-		Step:     "update_graph",
-		Message:  "动态图更新完成",
-		Duration: durationPtr(time.Since(stepStart)),
-		Details: map[string]interface{}{
-			"characters_count": graphChars,
-		},
-	})
 
 	p.mu.Lock()
 	p.status.CurrentStep = "plan_scenes"
-	p.status.Progress = 55
+	p.status.Progress = 45
 	p.mu.Unlock()
 
 	// Step 3: Plan scenes via location/time clustering + concurrent per-cluster planning
@@ -442,7 +385,7 @@ func (p *Pipeline) Convert(ctx context.Context, title, author string, chapters [
 		Step:    "generate_scenes",
 		Message: "步骤 4/6: 生成场景...",
 	})
-	state.Scenes, err = p.generateScenesSequential(ctx, state.Plans, state.SourceIndex, state.SceneCandidates, state.GraphMgr)
+	state.Scenes, err = p.generateScenesSequential(ctx, state.Plans, state.SourceIndex, state.SceneCandidates)
 	if err != nil {
 		writeSpan.RecordError(err)
 		writeSpan.End()
@@ -471,6 +414,19 @@ func (p *Pipeline) Convert(ctx context.Context, title, author string, chapters [
 			"scenes_count": len(state.Scenes),
 			"scenes":       sceneHeadings,
 		},
+	})
+
+	p.mu.Lock()
+	p.status.CurrentStep = "build_graph"
+	p.status.Progress = 75
+	p.mu.Unlock()
+
+	state.GraphMgr = buildGraphFromScenes(state.Scenes)
+
+	p.publishEvent(observability.PipelineEvent{
+		Type:    observability.EventGraphUpdated,
+		Step:    "build_graph",
+		Message: fmt.Sprintf("从剧本构建动态图: %d 角色", len(state.GraphMgr.SnapshotsAfter()["generated"].Characters)),
 	})
 
 	p.mu.Lock()
@@ -802,14 +758,32 @@ func emptyGraphManager(candidates []scene.SceneCandidate) *graph.Manager {
 	return graphMgr
 }
 
+// buildMinimalSceneContext creates a SceneContext from the plan and source text only,
+// without requiring a graph snapshot. Character info comes from the plan's character refs.
+func buildMinimalSceneContext(plan *scene.ScenePlan, sourceText, sourceSummary string) *scene.SceneContext {
+	characters := make([]scene.CharacterInfo, 0, len(plan.Characters))
+	for _, ref := range plan.Characters {
+		characters = append(characters, scene.CharacterInfo{
+			ID:   ref,
+			Name: ref,
+		})
+	}
+	return &scene.SceneContext{
+		ScenePlan:     plan,
+		SourceText:    sourceText,
+		SourceSummary: sourceSummary,
+		DramaticGoal:  plan.Purpose,
+		Characters:    characters,
+	}
+}
+
 // generateScenesSequential writes scenes in plan order with concurrent WriteScene calls.
-func (p *Pipeline) generateScenesSequential(ctx context.Context, plans []*scene.ScenePlan, sourceIndex *segment.SourceIndex, candidates []scene.SceneCandidate, graphMgr *graph.Manager) ([]schema.Scene, error) {
+// Graph state is not needed here — character info comes from scene plans directly.
+func (p *Pipeline) generateScenesSequential(ctx context.Context, plans []*scene.ScenePlan, sourceIndex *segment.SourceIndex, candidates []scene.SceneCandidate) ([]schema.Scene, error) {
 	candidateByID := make(map[string]scene.SceneCandidate, len(candidates))
 	for _, candidate := range candidates {
 		candidateByID[candidate.ID] = candidate
 	}
-
-	ctxBuilder := scene.NewContextBuilder(graphMgr.SnapshotsBefore(), graphMgr.SnapshotsAfter())
 
 	// Pre-build source context per plan (cheap, no LLM)
 	type planJob struct {
@@ -862,7 +836,7 @@ func (p *Pipeline) generateScenesSequential(ctx context.Context, plans []*scene.
 			defer wg.Done()
 			for i := range jobIdx {
 				job := jobs[i]
-				sceneCtx := ctxBuilder.Build(job.plan, job.sourceText, job.sourceSummary)
+				sceneCtx := buildMinimalSceneContext(job.plan, job.sourceText, job.sourceSummary)
 
 				sceneSpanName := fmt.Sprintf("pipeline.write_scene.%s", job.plan.ID)
 				_, sceneSpan := p.tracer.Start(ctx, sceneSpanName)
@@ -982,6 +956,42 @@ func sourceContextForPlan(sourceIndex *segment.SourceIndex, candidates map[strin
 		}
 	}
 	return sourceIndex.TextForIDs(sentenceIDs), strings.Join(summaries, " ")
+}
+
+// buildGraphFromScenes extracts character info from generated scenes and builds the graph.
+// Scenes' CharactersPresent fields act as natural clusters — character names are consistent
+// within each scene, and cross-scene deduplication is done by name.
+func buildGraphFromScenes(scenes []schema.Scene) *graph.Manager {
+	mgr := graph.NewManager()
+
+	// Collect unique character names across all scenes (first-appearance order)
+	seen := make(map[string]bool)
+	allNames := make([]string, 0)
+	for _, scene := range scenes {
+		for _, name := range scene.CharactersPresent {
+			if !seen[name] {
+				seen[name] = true
+				allNames = append(allNames, name)
+			}
+		}
+	}
+	if len(allNames) == 0 {
+		return mgr
+	}
+
+	// Assign deterministic IDs
+	initialSnap := graph.NewSnapshot("generated")
+	for i, name := range allNames {
+		id := fmt.Sprintf("char_%03d", i+1)
+		initialSnap.Characters[id] = &graph.CharacterState{
+			ID:   id,
+			Name: name,
+		}
+	}
+
+	mgr.SetInitialSnapshot("generated", initialSnap)
+	mgr.SetAfterSnapshot("generated", initialSnap)
+	return mgr
 }
 
 func collectCharactersFromGraph(snap *graph.GraphSnapshot) []schema.Character {

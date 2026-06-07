@@ -140,7 +140,7 @@ func TestGenerateScenesRunsConcurrently(t *testing.T) {
 	var scenes []schema.Scene
 	var err error
 	go func() {
-		scenes, err = p.generateScenesSequential(context.Background(), plans, nil, nil, graph.NewManager())
+		scenes, err = p.generateScenesSequential(context.Background(), plans, nil, nil)
 		close(done)
 	}()
 
@@ -172,6 +172,62 @@ func TestGenerateScenesRunsConcurrently(t *testing.T) {
 		t.Fatalf("unexpected scene order: %s, %s", scenes[0].Heading, scenes[1].Heading)
 	}
 }
+
+func TestBuildGraphFromScenes(t *testing.T) {
+	t.Run("empty_scenes", func(t *testing.T) {
+		mgr := buildGraphFromScenes(nil)
+		if mgr == nil {
+			t.Fatal("expected non-nil mgr")
+		}
+	})
+	t.Run("unique_characters_across_scenes", func(t *testing.T) {
+		scenes := []schema.Scene{
+			{ID: "s1", CharactersPresent: []string{"默尔索", "玛丽"}},
+			{ID: "s2", CharactersPresent: []string{"默尔索", "雷蒙"}},
+			{ID: "s3", CharactersPresent: []string{"玛丽", "老板"}},
+		}
+		mgr := buildGraphFromScenes(scenes)
+		snap := mgr.SnapshotsAfter()["generated"]
+		if snap == nil || len(snap.Characters) != 4 {
+			t.Fatalf("expected 4 unique characters, got %d", len(snap.Characters))
+		}
+		if snap.Characters["char_001"].Name != "默尔索" {
+			t.Errorf("expected char_001=默尔索, got %s", snap.Characters["char_001"].Name)
+		}
+		if snap.Characters["char_002"].Name != "玛丽" {
+			t.Errorf("expected char_002=玛丽, got %s", snap.Characters["char_002"].Name)
+		}
+	})
+	t.Run("deduplicates_by_name", func(t *testing.T) {
+		scenes := []schema.Scene{
+			{ID: "s1", CharactersPresent: []string{"A", "B"}},
+			{ID: "s2", CharactersPresent: []string{"A", "B", "C"}},
+		}
+		mgr := buildGraphFromScenes(scenes)
+		snap := mgr.SnapshotsAfter()["generated"]
+		if len(snap.Characters) != 3 {
+			t.Fatalf("expected 3 unique characters, got %d", len(snap.Characters))
+		}
+	})
+	t.Run("first_appearance_order", func(t *testing.T) {
+		scenes := []schema.Scene{
+			{ID: "s1", CharactersPresent: []string{"C", "A"}},
+			{ID: "s2", CharactersPresent: []string{"B"}},
+		}
+		mgr := buildGraphFromScenes(scenes)
+		snap := mgr.SnapshotsAfter()["generated"]
+		if snap.Characters["char_001"].Name != "C" {
+			t.Errorf("expected char_001=C (first appearance), got %s", snap.Characters["char_001"].Name)
+		}
+		if snap.Characters["char_002"].Name != "A" {
+			t.Errorf("expected char_002=A, got %s", snap.Characters["char_002"].Name)
+		}
+		if snap.Characters["char_003"].Name != "B" {
+			t.Errorf("expected char_003=B, got %s", snap.Characters["char_003"].Name)
+		}
+	})
+}
+
 func TestClusterSceneCandidates(t *testing.T) {
 	t.Run("empty", func(t *testing.T) {
 		if c := clusterSceneCandidates(nil); c != nil {
@@ -199,7 +255,7 @@ func TestClusterSceneCandidates(t *testing.T) {
 			{ID: "c2", Location: "街道", TimeFrame: "日"},
 		})
 		if len(c) != 2 || len(c[0]) != 1 || len(c[1]) != 1 {
-		t.Fatalf("expected 2 clusters of 1, got %d", len(c))
+			t.Fatalf("expected 2 clusters of 1, got %d", len(c))
 		}
 	})
 	t.Run("same_location_different_time", func(t *testing.T) {
@@ -274,7 +330,6 @@ func TestPlanFromCandidatesRunsConcurrentlyPerCluster(t *testing.T) {
 		},
 	}
 
-	// Two clusters: same location+time → one cluster, different → second cluster
 	candidates := []scene.SceneCandidate{
 		{ID: "c001", Location: "客厅", TimeFrame: "日"},
 		{ID: "c002", Location: "客厅", TimeFrame: "日"},
@@ -311,7 +366,6 @@ func TestPlanFromCandidatesRunsConcurrentlyPerCluster(t *testing.T) {
 	if len(allPlans) != 4 {
 		t.Fatalf("expected 4 plans, got %d", len(allPlans))
 	}
-	// Verify plans in order: first cluster's plans, then second cluster's plans
 	if allPlans[0].SourceCandidateIDs[0] != "c001" || allPlans[1].SourceCandidateIDs[0] != "c002" {
 		t.Fatalf("first cluster plans out of order: %#v", allPlans[:2])
 	}

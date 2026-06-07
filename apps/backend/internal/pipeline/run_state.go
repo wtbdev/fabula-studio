@@ -32,10 +32,18 @@ type RunState struct {
 }
 
 func (s *RunState) finalGraph() *graph.GraphSnapshot {
-	if s == nil || s.GraphMgr == nil || len(s.SceneCandidates) == 0 {
+	if s == nil || s.GraphMgr == nil {
 		return nil
 	}
-	return s.GraphMgr.SnapshotsAfter()[s.SceneCandidates[len(s.SceneCandidates)-1].ID]
+	// The graph built from generated scenes uses "generated" as the single snapshot key.
+	if snap := s.GraphMgr.SnapshotsAfter()["generated"]; snap != nil {
+		return snap
+	}
+	// Fallback: lookup the last scene candidate's after-snapshot (legacy path)
+	if len(s.SceneCandidates) > 0 {
+		return s.GraphMgr.SnapshotsAfter()[s.SceneCandidates[len(s.SceneCandidates)-1].ID]
+	}
+	return nil
 }
 
 func (s *RunState) result() *PipelineResult {
