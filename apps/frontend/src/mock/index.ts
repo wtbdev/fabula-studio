@@ -633,7 +633,6 @@ const createIncrementalMockScenes = (projectId: string, projectScenes: SceneDTO[
 
   return [...updatedScenes, incrementalScene]
 }
-}
 
 const createMockGenerationArtifacts = (project: ProjectDTO, generatedScenes: SceneDTO[]): GenerationArtifacts => ({
   sourceIndex: {
@@ -1208,4 +1207,3 @@ Mock.mock(/\/api\/scenes\/[^/?]+$/, 'patch', (options: MockRequestOptions) => {
   )
 })
 
-})
