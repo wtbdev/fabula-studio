@@ -25,7 +25,7 @@ import { generationApi } from '../api/generation'
 import { projectsApi } from '../api/projects'
 import { scenesApi } from '../api/scenes'
 import { useAuth } from '../composables/useAuth'
-import type { GenerationArtifacts, GenerateStatusDTO, ProjectDTO, SceneDTO } from '../api/types'
+import type { GenerationArtifacts, GenerateStatusDTO, PipelineEventDTO, ProjectDTO, SceneDTO } from '../api/types'
 import SceneList from '../components/SceneList.vue'
 import ScriptEditor from '../components/ScriptEditor.vue'
 import AiSuggestionPanel from '../components/editor/AiSuggestionPanel.vue'
@@ -34,6 +34,26 @@ import SceneRegenerateModal from '../components/editor/SceneRegenerateModal.vue'
 type SaveStatus = 'saved' | 'dirty' | 'saving' | 'failed'
 type WorkbenchMode = 'script' | 'settings'
 type ExtensionTab = 'info' | 'source' | 'suggestions' | 'artifacts'
+
+type EventDetails = Record<string, unknown>
+type RealtimeTreeUnit = {
+  id: string
+  title: string
+  summary: string
+  meta: string
+  characters: string[]
+}
+type RealtimePlan = {
+  id: string
+  title: string
+  purpose: string
+  location?: string
+  sourceNodeIds: string[]
+}
+type RealtimeSceneHeading = {
+  id: string
+  heading: string
+}
 
 const route = useRoute()
 const router = useRouter()
@@ -61,8 +81,18 @@ const exportFormat = ref<ExportFormat>('txt')
 const exportLoading = ref(false)
 const sceneRegenerateVisible = ref(false)
 const applyingRegeneratedScene = ref(false)
+const realtimeEvents = ref<PipelineEventDTO[]>([])
+const realtimeTreeUnits = ref<RealtimeTreeUnit[]>([])
+const realtimePlans = ref<RealtimePlan[]>([])
+const realtimeSceneHeadings = ref<RealtimeSceneHeading[]>([])
+const realtimeTraceId = ref<string | null>(null)
+const realtimeRunId = ref<string | null>(null)
+const realtimeProgress = ref<number | null>(null)
+const realtimeCurrentStep = ref<string | null>(null)
+const pendingGenerationJobId = ref<string | null>(null)
 let generationPollingTimer: number | null = null
 let pollingGenerationStatus = false
+let generationEventSource: EventSource | null = null
 
 
 const workbenchModes: Array<{ key: WorkbenchMode; label: string }> = [
@@ -149,6 +179,8 @@ const hasProjectSettingsChanged = computed(() => {
 })
 
 const stageLabelMap: Record<string, string> = {
+  queued: '生成排队中',
+  running: '生成运行中',
   source_indexing: '原文索引构建中',
   beat_extracting: '故事节拍提取中',
   beat_reconciling: '节拍边界校准中',
@@ -157,33 +189,197 @@ const stageLabelMap: Record<string, string> = {
   graph_updating: '关系图谱更新中',
   editor_reviewing: '主编审校中',
   final_validating: '最终校验中',
+  extract_story_beats: '故事节拍提取中',
+  aggregate_units: '剧情单元聚合中',
+  update_graph: '关系图谱更新中',
+  graph_update: '关系图谱更新中',
+  plan_scenes: '场景规划中',
+  generate_scenes: '场景写作中',
+  write_scene: '场景写作中',
+  graph_hook: '图谱钩子处理中',
+  editor_review: '主编审校中',
+  validation: '最终校验中',
+  commit_result: '生成结果提交中',
+  completed: '生成完成',
 }
 
 const generationStepLabel = computed(() => {
-  const currentStep = generateStatus.value?.currentStep ?? generateStatus.value?.job?.currentStep
+  const currentStep =
+    realtimeCurrentStep.value ?? generateStatus.value?.currentStep ?? generateStatus.value?.job?.currentStep
   if (!currentStep) return '暂无生成状态'
 
   return stageLabelMap[currentStep] ?? currentStep
 })
 
 const generationProgress = computed(
-  () => generateStatus.value?.progress ?? generateStatus.value?.job?.progress ?? 0,
+  () => realtimeProgress.value ?? generateStatus.value?.progress ?? generateStatus.value?.job?.progress ?? 0,
 )
 
 const applyGenerationArtifacts = (artifacts?: GenerationArtifacts) => {
   if (artifacts) generationArtifacts.value = artifacts
 }
 
+const currentGenerationJobId = computed(() => generateStatus.value?.jobId ?? generateStatus.value?.job?.id ?? null)
+
+const eventMatchesCurrentGeneration = (event: PipelineEventDTO) => {
+  const currentJobId = currentGenerationJobId.value
+  const pendingJobId = pendingGenerationJobId.value
+
+  if (event.projectId) return event.projectId === projectId.value
+  if (event.jobId && currentJobId) return event.jobId === currentJobId
+  if (event.jobId && pendingJobId) return event.jobId === pendingJobId
+
+  return false
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null
+
+const toStringArray = (value: unknown) =>
+  Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
+
+const getString = (record: Record<string, unknown>, key: string) => {
+  const value = record[key]
+  return typeof value === 'string' ? value : ''
+}
+
+const resetRealtimeGeneration = () => {
+  realtimeEvents.value = []
+  realtimeTreeUnits.value = []
+  realtimePlans.value = []
+  realtimeSceneHeadings.value = []
+  realtimeTraceId.value = null
+  realtimeRunId.value = null
+  realtimeProgress.value = null
+  realtimeCurrentStep.value = null
+  pendingGenerationJobId.value = null
+}
+
+const collectRealtimeTreeUnits = (details: EventDetails) => {
+  const tree = details.tree
+  if (!isRecord(tree) || !isRecord(tree.nodes)) return []
+  const nodes = tree.nodes
+
+  const leafIds = toStringArray(tree.leaf_node_ids)
+  const rootNodeId = typeof tree.root_node_id === 'string' ? tree.root_node_id : ''
+  const ids = leafIds.length ? leafIds : Object.keys(nodes).filter((id) => id !== rootNodeId)
+
+  return ids.flatMap((id): RealtimeTreeUnit[] => {
+    const node = nodes[id]
+    if (!isRecord(node)) return []
+
+    const start = getString(node, 'start_sentence_id') || '?'
+    const end = getString(node, 'end_sentence_id') || '?'
+    const location = getString(node, 'location') || '-'
+    const timeFrame = getString(node, 'time_frame') || '-'
+    const summary = getString(node, 'summary') || getString(node, 'main_conflict') || getString(node, 'text_content')
+
+    return [
+      {
+        id,
+        title: getString(node, 'unit_type') || getString(node, 'decision') || id,
+        summary: summary || '暂无摘要。',
+        meta: `${start} → ${end} · ${location} · ${timeFrame}`,
+        characters: toStringArray(node.characters).slice(0, 5),
+      },
+    ]
+  })
+}
+
+const collectRealtimePlans = (details: EventDetails) => {
+  const plans = details.plans
+  if (!Array.isArray(plans)) return []
+
+  return plans.flatMap((plan, index): RealtimePlan[] => {
+    if (!isRecord(plan)) return []
+    const id = getString(plan, 'id') || `plan-${index + 1}`
+    const sceneCount = typeof plan.scene_count === 'number' ? plan.scene_count : undefined
+
+    return [
+      {
+        id,
+        title: sceneCount ? `${id} · ${sceneCount} 场` : id,
+        purpose: getString(plan, 'purpose') || '该场景计划未提供目的说明。',
+        location: getString(plan, 'location') || undefined,
+        sourceNodeIds: toStringArray(plan.source_node_ids),
+      },
+    ]
+  })
+}
+
+const collectRealtimeSceneHeadings = (details: EventDetails) => {
+  const scenes = details.scenes
+  if (!Array.isArray(scenes)) return []
+
+  return scenes.flatMap((scene, index): RealtimeSceneHeading[] => {
+    if (typeof scene === 'string') return [{ id: `scene-${index + 1}`, heading: scene }]
+    if (!isRecord(scene)) return []
+
+    const heading = getString(scene, 'heading') || getString(scene, 'title') || `场景 ${index + 1}`
+    return [{ id: getString(scene, 'id') || `scene-${index + 1}`, heading }]
+  })
+}
+
+const applyPipelineEvent = (event: PipelineEventDTO) => {
+  if (!eventMatchesCurrentGeneration(event)) return
+  pendingGenerationJobId.value = event.jobId ?? pendingGenerationJobId.value
+
+  realtimeEvents.value = [event, ...realtimeEvents.value].slice(0, 30)
+  realtimeTraceId.value = event.traceId ?? realtimeTraceId.value
+  realtimeRunId.value = event.runId ?? realtimeRunId.value
+  realtimeProgress.value = typeof event.progress === 'number' ? event.progress : realtimeProgress.value
+  realtimeCurrentStep.value = event.step ?? realtimeCurrentStep.value
+
+  const details = event.details ?? {}
+  if (event.type === 'tree_snapshot') {
+    realtimeTreeUnits.value = collectRealtimeTreeUnits(details)
+  }
+  if (event.type === 'scene_planned') {
+    realtimePlans.value = collectRealtimePlans(details)
+  }
+  if (event.type === 'scene_written' || event.step === 'generate_scenes') {
+    const headings = collectRealtimeSceneHeadings(details)
+    if (headings.length) realtimeSceneHeadings.value = headings
+  }
+}
+
+const getEventStreamURL = () => {
+  const baseURL = (import.meta.env.VITE_API_BASE_URL ?? '/api').replace(/\/$/, '')
+  return `${baseURL}/events/stream`
+}
+
+const stopGenerationEvents = () => {
+  if (!generationEventSource) return
+  generationEventSource.close()
+  generationEventSource = null
+}
+
+const startGenerationEvents = () => {
+  if (generationEventSource) return
+
+  generationEventSource = new EventSource(getEventStreamURL())
+  generationEventSource.onmessage = (messageEvent) => {
+    try {
+      applyPipelineEvent(JSON.parse(messageEvent.data) as PipelineEventDTO)
+    } catch {
+      // Ignore malformed SSE payloads; polling remains the source of truth for completion.
+    }
+  }
+}
+
 const isGenerationActive = (status?: string) =>
   status === 'generating' || status === 'queued' || status === 'running'
 
 const stopGenerationPolling = () => {
-  if (!generationPollingTimer) return
-  window.clearInterval(generationPollingTimer)
-  generationPollingTimer = null
+  if (generationPollingTimer) {
+    window.clearInterval(generationPollingTimer)
+    generationPollingTimer = null
+  }
+  stopGenerationEvents()
 }
 
 const applyGenerateStatus = (status: GenerateStatusDTO) => {
+  pendingGenerationJobId.value = status.jobId ?? status.job?.id ?? pendingGenerationJobId.value
   generateStatus.value = status
   applyGenerationArtifacts(status.artifacts ?? status.job?.artifacts)
 
@@ -242,6 +438,8 @@ const pollGenerationStatus = async () => {
 
     if (status.status === 'completed') {
       stopGenerationPolling()
+      realtimeProgress.value = null
+      realtimeCurrentStep.value = null
       await refreshCompletedGeneration()
       void fetchMe()
       generating.value = false
@@ -251,6 +449,8 @@ const pollGenerationStatus = async () => {
 
     if (status.status === 'failed') {
       stopGenerationPolling()
+      realtimeProgress.value = null
+      realtimeCurrentStep.value = null
       generating.value = false
       message.error(status.errorMessage ?? status.job?.errorMessage ?? '剧本生成失败，请稍后重试')
       return
@@ -266,6 +466,7 @@ const pollGenerationStatus = async () => {
 
 const startGenerationPolling = () => {
   generating.value = true
+  startGenerationEvents()
   void pollGenerationStatus()
   if (!generationPollingTimer) {
     generationPollingTimer = window.setInterval(() => {
@@ -281,8 +482,22 @@ const sourceIndexChapterCount = computed(
 const storyBeatCount = computed(() => generationArtifacts.value?.storyBeats?.length ?? 0)
 const scenePlanCount = computed(() => generationArtifacts.value?.scenePlan?.length ?? 0)
 
+const realtimeTreeUnitCount = computed(() => realtimeTreeUnits.value.length)
+const realtimePlanCount = computed(() => realtimePlans.value.length)
+const realtimeSceneHeadingCount = computed(() => realtimeSceneHeadings.value.length)
+
+const hasRealtimeGenerationArtifacts = computed(
+  () =>
+    realtimeEvents.value.length > 0 ||
+    realtimeTreeUnitCount.value > 0 ||
+    realtimePlanCount.value > 0 ||
+    realtimeSceneHeadingCount.value > 0 ||
+    Boolean(realtimeTraceId.value || realtimeRunId.value),
+)
+
 const hasGenerationArtifacts = computed(
   () =>
+    hasRealtimeGenerationArtifacts.value ||
     Boolean(generationArtifacts.value?.sourceIndex) ||
     storyBeatCount.value > 0 ||
     scenePlanCount.value > 0 ||
@@ -328,6 +543,24 @@ const formatDate = (value?: string) => {
     hour: '2-digit',
     minute: '2-digit',
   }).format(date)
+}
+
+const formatEventTimestamp = (value?: string) => {
+  if (!value) return '刚刚'
+
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+
+  return new Intl.DateTimeFormat('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).format(date)
+}
+
+const getEventLabel = (event: PipelineEventDTO) => {
+  const step = event.step ? stageLabelMap[event.step] ?? event.step : event.type
+  return event.message || event.error || step
 }
 
 const loadProject = async () => {
@@ -605,11 +838,13 @@ const handleGenerateProject = async () => {
     errorMessage: null,
     updatedAt: new Date().toISOString(),
   }
+  resetRealtimeGeneration()
+  startGenerationEvents()
   generateStatus.value = {
     projectId: project.value.id,
     status: 'queued',
     progress: 0,
-    currentStep: 'source_indexing',
+    currentStep: 'queued',
   }
 
   try {
@@ -617,6 +852,7 @@ const handleGenerateProject = async () => {
       config: project.value.config,
       adaptationProfile: project.value.adaptationProfile,
     })
+    pendingGenerationJobId.value = result.jobId ?? result.job?.id ?? pendingGenerationJobId.value
     generateStatus.value = {
       projectId: project.value.id,
       jobId: result.jobId,
@@ -639,6 +875,7 @@ const handleGenerateProject = async () => {
     }
     generateStatus.value = previousGenerateStatus
     generating.value = false
+    stopGenerationEvents()
     message.error(error instanceof Error ? error.message : '剧本生成失败，请稍后重试')
   }
 }
@@ -716,6 +953,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   stopGenerationPolling()
+  stopGenerationEvents()
 })
 
 watch(
@@ -1110,7 +1348,79 @@ watch(
               <h2>生成产物</h2>
 
               <div v-if="hasGenerationArtifacts" class="artifact-stack">
-                <section class="artifact-section">
+                <section v-if="hasRealtimeGenerationArtifacts" class="artifact-section realtime">
+                  <div class="artifact-section-heading">
+                    <h3>实时生成</h3>
+                    <n-tag size="small" :bordered="false" type="info">
+                      {{ realtimeEvents.length }} 事件
+                    </n-tag>
+                  </div>
+                  <p>{{ generationStepLabel }}</p>
+                  <dl v-if="realtimeTraceId || realtimeRunId" class="config-grid artifact-graph-grid artifact-trace-grid">
+                    <div v-if="realtimeTraceId">
+                      <dt>Trace ID</dt>
+                      <dd>{{ realtimeTraceId }}</dd>
+                    </div>
+                    <div v-if="realtimeRunId">
+                      <dt>Run ID</dt>
+                      <dd>{{ realtimeRunId }}</dd>
+                    </div>
+                  </dl>
+                  <ul v-if="realtimeEvents.length" class="artifact-event-list">
+                    <li v-for="event in realtimeEvents.slice(0, 8)" :key="`${event.timestamp}-${event.type}-${event.step ?? ''}`">
+                      <span>{{ formatEventTimestamp(event.timestamp) }}</span>
+                      <strong>{{ getEventLabel(event) }}</strong>
+                    </li>
+                  </ul>
+                </section>
+
+                <section v-if="realtimeTreeUnits.length" class="artifact-section">
+                  <div class="artifact-section-heading">
+                    <h3>实时剧情单元</h3>
+                    <n-tag size="small" :bordered="false" type="success">{{ realtimeTreeUnitCount }} 个</n-tag>
+                  </div>
+                  <ol class="artifact-list">
+                    <li v-for="unit in realtimeTreeUnits" :key="unit.id">
+                      <strong>{{ unit.title }}</strong>
+                      <p>{{ unit.meta }}</p>
+                      <p>{{ unit.summary }}</p>
+                      <n-space v-if="unit.characters.length" size="small">
+                        <n-tag v-for="character in unit.characters" :key="character" size="small" :bordered="false">
+                          {{ character }}
+                        </n-tag>
+                      </n-space>
+                    </li>
+                  </ol>
+                </section>
+
+                <section v-if="realtimePlans.length" class="artifact-section">
+                  <div class="artifact-section-heading">
+                    <h3>实时场景规划</h3>
+                    <n-tag size="small" :bordered="false" type="warning">{{ realtimePlanCount }} 场</n-tag>
+                  </div>
+                  <ol class="artifact-list">
+                    <li v-for="plan in realtimePlans" :key="plan.id">
+                      <strong>{{ plan.title }}</strong>
+                      <p>{{ plan.purpose }}</p>
+                      <p v-if="plan.location">地点：{{ plan.location }}</p>
+                      <p v-if="plan.sourceNodeIds.length">来源：{{ plan.sourceNodeIds.join('、') }}</p>
+                    </li>
+                  </ol>
+                </section>
+
+                <section v-if="realtimeSceneHeadings.length" class="artifact-section">
+                  <div class="artifact-section-heading">
+                    <h3>实时场景标题</h3>
+                    <n-tag size="small" :bordered="false" type="success">{{ realtimeSceneHeadingCount }} 场</n-tag>
+                  </div>
+                  <ol class="artifact-list">
+                    <li v-for="scene in realtimeSceneHeadings" :key="scene.id">
+                      <strong>{{ scene.heading }}</strong>
+                    </li>
+                  </ol>
+                </section>
+
+                <section v-if="generationArtifacts?.sourceIndex" class="artifact-section">
                   <div class="artifact-section-heading">
                     <h3>原文索引</h3>
                     <n-tag size="small" :bordered="false" type="info">
@@ -1603,6 +1913,11 @@ watch(
   background: rgba(141, 73, 56, 0.06);
 }
 
+.artifact-section.realtime {
+  border-color: rgba(98, 130, 111, 0.32);
+  background: rgba(98, 130, 111, 0.08);
+}
+
 .artifact-section-heading {
   display: flex;
   align-items: center;
@@ -1649,6 +1964,38 @@ watch(
 
 .artifact-graph-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.artifact-trace-grid dd {
+  overflow-wrap: anywhere;
+}
+
+.artifact-event-list {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.artifact-event-list li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+  color: var(--color-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.artifact-event-list span {
+  color: var(--color-sage);
+  font-weight: 700;
+}
+
+.artifact-event-list strong {
+  color: var(--color-ink);
+  font-weight: 600;
 }
 
 .scene-facts {

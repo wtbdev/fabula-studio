@@ -130,6 +130,22 @@ export interface GenerationJobDTO {
   updatedAt?: string
 }
 
+export interface PipelineEventDTO {
+  type: string
+  timestamp: string
+  step?: string
+  node_id?: string
+  message: string
+  details?: Record<string, unknown>
+  duration?: number | string | null
+  error?: string
+  projectId?: string
+  jobId?: string
+  runId?: string
+  traceId?: string
+  progress?: number
+}
+
 export interface GenerateProjectRequest {
   config?: AdaptConfig
   adaptationProfile?: AdaptationProfile
