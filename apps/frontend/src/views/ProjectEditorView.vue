@@ -14,7 +14,6 @@ import {
   FileText,
   FileType,
   GitBranch,
-  MapPin,
   RefreshCw,
   Save,
   Settings,
