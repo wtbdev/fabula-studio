@@ -21,8 +21,8 @@ type ChiefEditorAgent struct {
 
 // EditResult contains the editor's review findings and recommended changes.
 type EditResult struct {
-	Issues  []string `json:"issues"`
-	Changes []string `json:"changes"`
+	Issues  []editorIssue  `json:"issues"`
+	Changes []editorChange `json:"changes"`
 }
 
 const chiefEditorDesc = "审查完整剧本，提出一致性、节奏和质量建议"
@@ -74,10 +74,24 @@ func NewChiefEditorAgent(modelName, apiKey, baseURL string) *ChiefEditorAgent {
 	return &ChiefEditorAgent{agent: agt}
 }
 
+// editorIssue is a single review issue returned by the editor agent.
+type editorIssue struct {
+	Severity         string   `json:"severity"`
+	Description      string   `json:"description"`
+	AffectedLocations []string `json:"affectedLocations,omitempty"`
+}
+
+// editorChange is a single suggested change returned by the editor agent.
+type editorChange struct {
+	Type             string   `json:"type"`
+	Description      string   `json:"description"`
+	AffectedLocations []string `json:"affectedLocations,omitempty"`
+}
+
 // editorOutput is the JSON structure returned by the editor agent.
 type editorOutput struct {
-	Issues  []string `json:"issues"`
-	Changes []string `json:"changes"`
+	Issues  []editorIssue  `json:"issues"`
+	Changes []editorChange `json:"changes"`
 }
 
 // ReviewAndRevise reviews the complete screenplay and returns findings only.

@@ -492,7 +492,7 @@ func (p *Pipeline) Convert(ctx context.Context, title, author string, chapters [
 		for _, issue := range editResult.Issues {
 			state.Artifacts.Warnings = append(state.Artifacts.Warnings, schema.GenerationWarning{
 				Code:    "editor_review_issue",
-				Message: issue,
+				Message: issue.Description,
 				Source:  "chief-editor",
 			})
 		}
