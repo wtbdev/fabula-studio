@@ -21,7 +21,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-const generationCost int32 = 300
+const generationCost int32 = 1
 
 func (s *Server) handleAuth(w http.ResponseWriter, r *http.Request) {
 	parts := splitAPIPath(r.URL.Path)

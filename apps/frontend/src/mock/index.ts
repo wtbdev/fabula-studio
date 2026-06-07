@@ -809,7 +809,7 @@ const startMockGenerationJob = (project: ProjectDTO, user: MockUser) => {
     updatedAt: createdAt,
   }
 
-  user.aiPoints -= 300
+  user.aiPoints -= 1
   user.updatedAt = createdAt
   project.status = 'generating'
   project.errorMessage = null
@@ -1136,7 +1136,7 @@ Mock.mock(/\/api\/projects\/[^/?]+\/generate$/, 'post', (options: MockRequestOpt
   }
 
   const activeJob = getActiveGenerationJob(projectId)
-  if (!activeJob && auth.user.aiPoints < 300) {
+  if (!activeJob && auth.user.aiPoints < 1) {
     return fail(50001, 'AI 点数不足')
   }
 

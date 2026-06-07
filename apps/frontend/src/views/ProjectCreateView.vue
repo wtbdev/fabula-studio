@@ -65,7 +65,7 @@ const sourceStats = computed(() => {
   }
 })
 
-const canGenerate = computed(() => (authState.user?.aiPoints ?? 0) >= 300)
+const canGenerate = computed(() => (authState.user?.aiPoints ?? 0) >= 1)
 
 const rules: FormRules = {
   title: [{ required: true, message: '请输入项目名称', trigger: ['blur', 'input'] }],
@@ -360,7 +360,7 @@ const handleCreateAndGenerate = async () => {
               </template>
               <span class="create-generate-copy">
                 <strong>创建并生成</strong>
-                <small>消耗 300 点</small>
+                <small>消耗 1 点</small>
               </span>
             </n-button>
           </n-space>

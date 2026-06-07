@@ -168,7 +168,7 @@ const flowSteps = [
         <span>核心工作区贯通</span>
       </article>
       <article>
-        <strong>300</strong>
+        <strong>1</strong>
         <span>点数生成 MVP 初稿</span>
       </article>
       <article>
