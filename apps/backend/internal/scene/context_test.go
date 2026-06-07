@@ -27,10 +27,10 @@ func TestContextBuilderUsesCandidateBeforeSnapshot(t *testing.T) {
 		map[string]*graph.GraphSnapshot{"candidate_001": after},
 	)
 	plan := &ScenePlan{
-		ID:            "plan_001",
-		SourceNodeIDs: []string{"candidate_001"},
-		Purpose:       "force Ada and Ben to cooperate",
-		Characters:    []string{"Ada", "char_002"},
+		ID:                 "plan_001",
+		SourceCandidateIDs: []string{"candidate_001"},
+		Purpose:            "force Ada and Ben to cooperate",
+		Characters:         []string{"Ada", "char_002"},
 	}
 
 	ctx := builder.Build(plan, "source", "summary")

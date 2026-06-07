@@ -33,8 +33,8 @@ func TestNormalizeScenePlansJSONAcceptsWrappedCamelCaseOutput(t *testing.T) {
 	if plan.SceneCount != 1 {
 		t.Fatalf("unexpected scene count: %d", plan.SceneCount)
 	}
-	if len(plan.SourceNodeIDs) != 1 || plan.SourceNodeIDs[0] != "candidate_001" {
-		t.Fatalf("unexpected source IDs: %#v", plan.SourceNodeIDs)
+	if len(plan.SourceCandidateIDs) != 1 || plan.SourceCandidateIDs[0] != "candidate_001" {
+		t.Fatalf("unexpected source IDs: %#v", plan.SourceCandidateIDs)
 	}
 	if plan.TimeFrame != "当天早上" {
 		t.Fatalf("unexpected time frame: %q", plan.TimeFrame)
@@ -50,11 +50,11 @@ func TestNormalizeScenePlansJSONAcceptsWrappedCamelCaseOutput(t *testing.T) {
 func TestValidateAndRepairScenePlansNormalizesSmallModelOutput(t *testing.T) {
 	plans := []*scene.ScenePlan{
 		{
-			ID:            "scene-001",
-			SourceNodeIDs: []string{"candidate_001"},
-			SceneCount:    1,
-			Sequence:      99,
-			KeyPlotPoints: []string{"保留核心任务"},
+			ID:                 "scene-001",
+			SourceCandidateIDs: []string{"candidate_001"},
+			SceneCount:         1,
+			Sequence:           99,
+			KeyPlotPoints:      []string{"保留核心任务"},
 		},
 	}
 	candidates := []scene.SceneCandidate{

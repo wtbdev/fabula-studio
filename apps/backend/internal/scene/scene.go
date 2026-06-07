@@ -10,27 +10,31 @@ import (
 	"github.com/fabula-studio/backend/internal/segment"
 )
 
-// ScenePlan defines how source-grounded scene candidates map to screenplay scenes.
+// ScenePlan defines one screenplay scene backed by source-grounded scene candidates.
 type ScenePlan struct {
-	ID            string   `json:"id"`
-	SourceNodeIDs []string `json:"source_node_ids"` // Backward-compatible JSON name; values are SceneCandidate IDs.
-	SceneCount    int      `json:"scene_count"`     // 0 = summary only, 1 = single scene, N = multiple
-	Purpose       string   `json:"purpose"`
-	Location      string   `json:"location"`
-	TimeFrame     string   `json:"time_frame"`
-	Characters    []string `json:"characters"`
-	KeyPlotPoints []string `json:"key_plot_points"`
-	OmitDetails   []string `json:"omit_details"`
-	Sequence      int      `json:"sequence"`
-	SummaryOnly   string   `json:"summary_only,omitempty"`
+	ID                 string   `json:"id"`
+	SourceCandidateIDs []string `json:"source_candidate_ids"`
+	SceneCount         int      `json:"scene_count"` // Always normalized to 1: one plan writes one scene.
+	Purpose            string   `json:"purpose"`
+	Location           string   `json:"location"`
+	TimeFrame          string   `json:"time_frame"`
+	Characters         []string `json:"characters"`
+	KeyPlotPoints      []string `json:"key_plot_points"`
+	OmitDetails        []string `json:"omit_details"`
+	Sequence           int      `json:"sequence"`
 }
 
-// SourceCandidateIDs returns the candidate IDs this plan covers.
-func (s *ScenePlan) SourceCandidateIDs() []string {
+// CandidateIDs returns the candidate IDs this plan covers.
+func (s *ScenePlan) CandidateIDs() []string {
 	if s == nil {
 		return nil
 	}
-	return s.SourceNodeIDs
+	return s.SourceCandidateIDs
+}
+
+// SourceCandidateRefs returns the candidate IDs this plan covers.
+func (s *ScenePlan) SourceCandidateRefs() []string {
+	return s.CandidateIDs()
 }
 
 // SceneCandidate is the deterministic bridge from extracted story beats to LLM scene planning.
@@ -89,10 +93,10 @@ func ValidateAndRepairScenePlans(plans []*ScenePlan, candidates []SceneCandidate
 			continue
 		}
 		fixed := repairScenePlan(plan, len(repaired)+1, byID)
-		if len(fixed.SourceCandidateIDs()) == 0 {
+		if len(fixed.CandidateIDs()) == 0 {
 			continue
 		}
-		for _, id := range fixed.SourceCandidateIDs() {
+		for _, id := range fixed.CandidateIDs() {
 			usedCandidates[id] = struct{}{}
 		}
 		repaired = append(repaired, fixed)
@@ -114,25 +118,20 @@ func repairScenePlan(plan *ScenePlan, sequence int, candidates map[string]SceneC
 	if fixed.ID == "" {
 		fixed.ID = fmt.Sprintf("plan_%03d", sequence)
 	}
-	fixed.SourceNodeIDs = compactStrings(fixed.SourceNodeIDs)
-	if len(fixed.SourceNodeIDs) == 0 && len(candidates) == 1 {
+	fixed.SourceCandidateIDs = compactStrings(fixed.SourceCandidateIDs)
+	if len(fixed.SourceCandidateIDs) == 0 && len(candidates) == 1 {
 		for id := range candidates {
-			fixed.SourceNodeIDs = []string{id}
+			fixed.SourceCandidateIDs = []string{id}
 		}
 	}
-	if fixed.SceneCount < 0 {
-		fixed.SceneCount = 0
-	}
-	if fixed.SceneCount == 0 && strings.TrimSpace(fixed.SummaryOnly) == "" {
-		fixed.SceneCount = 1
-	}
+	fixed.SceneCount = 1
 	fixed.Purpose = strings.TrimSpace(fixed.Purpose)
 	fixed.Location = strings.TrimSpace(fixed.Location)
 	fixed.TimeFrame = strings.TrimSpace(fixed.TimeFrame)
 	fixed.Characters = compactStrings(fixed.Characters)
 	fixed.KeyPlotPoints = compactStrings(fixed.KeyPlotPoints)
 	fixed.OmitDetails = compactStrings(fixed.OmitDetails)
-	for _, sourceID := range fixed.SourceCandidateIDs() {
+	for _, sourceID := range fixed.CandidateIDs() {
 		candidate, ok := candidates[sourceID]
 		if !ok {
 			continue
@@ -159,15 +158,15 @@ func repairScenePlan(plan *ScenePlan, sequence int, candidates map[string]SceneC
 
 func planFromCandidate(candidate SceneCandidate, sequence int) *ScenePlan {
 	plan := &ScenePlan{
-		ID:            fmt.Sprintf("plan_%03d", sequence),
-		SourceNodeIDs: []string{candidate.ID},
-		SceneCount:    1,
-		Purpose:       candidate.DramaticPurpose,
-		Location:      candidate.Location,
-		TimeFrame:     candidate.TimeFrame,
-		Characters:    compactStrings(candidate.Characters),
-		KeyPlotPoints: []string{candidate.Summary},
-		Sequence:      sequence,
+		ID:                 fmt.Sprintf("plan_%03d", sequence),
+		SourceCandidateIDs: []string{candidate.ID},
+		SceneCount:         1,
+		Purpose:            candidate.DramaticPurpose,
+		Location:           candidate.Location,
+		TimeFrame:          candidate.TimeFrame,
+		Characters:         compactStrings(candidate.Characters),
+		KeyPlotPoints:      []string{candidate.Summary},
+		Sequence:           sequence,
 	}
 	return repairScenePlan(plan, sequence, map[string]SceneCandidate{candidate.ID: candidate})
 }
@@ -178,6 +177,8 @@ func compactPlans(plans []*ScenePlan) []*ScenePlan {
 		if plan == nil {
 			continue
 		}
+		plan.SourceCandidateIDs = compactStrings(plan.SourceCandidateIDs)
+		plan.SceneCount = 1
 		if strings.TrimSpace(plan.ID) == "" {
 			plan.ID = fmt.Sprintf("plan_%03d", len(out)+1)
 		}
@@ -207,41 +208,46 @@ func compactStrings(values []string) []string {
 	return out
 }
 
-// UnmarshalJSON handles LLM quirks (e.g. omit_details as string instead of array,
-// summary_only as a boolean instead of summary text).
+func normalizeStringSlice(value interface{}) []string {
+	switch v := value.(type) {
+	case string:
+		if strings.TrimSpace(v) == "" {
+			return nil
+		}
+		return []string{v}
+	case []string:
+		return v
+	case []interface{}:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+// UnmarshalJSON handles LLM quirks and accepts legacy source_node_ids as input only.
 func (s *ScenePlan) UnmarshalJSON(data []byte) error {
 	type Alias ScenePlan
 	aux := &struct {
-		OmitDetails interface{} `json:"omit_details"`
-		SummaryOnly interface{} `json:"summary_only"`
+		SourceCandidateIDs interface{} `json:"source_candidate_ids"`
+		SourceNodeIDs      interface{} `json:"source_node_ids"`
+		OmitDetails        interface{} `json:"omit_details"`
 		*Alias
 	}{Alias: (*Alias)(s)}
 	if err := json.Unmarshal(data, aux); err != nil {
 		return err
 	}
-	switch v := aux.OmitDetails.(type) {
-	case []interface{}:
-		s.OmitDetails = make([]string, 0, len(v))
-		for _, item := range v {
-			s.OmitDetails = append(s.OmitDetails, fmt.Sprintf("%v", item))
-		}
-	case string:
-		if v != "" {
-			s.OmitDetails = []string{v}
-		}
+	s.SceneCount = 1
+	s.SourceCandidateIDs = compactStrings(normalizeStringSlice(aux.SourceCandidateIDs))
+	if len(s.SourceCandidateIDs) == 0 {
+		s.SourceCandidateIDs = compactStrings(normalizeStringSlice(aux.SourceNodeIDs))
 	}
-	switch v := aux.SummaryOnly.(type) {
-	case string:
-		s.SummaryOnly = v
-	case bool:
-		if !v {
-			s.SummaryOnly = ""
-		}
-	default:
-		if v != nil {
-			s.SummaryOnly = fmt.Sprintf("%v", v)
-		}
-	}
+	s.OmitDetails = compactStrings(normalizeStringSlice(aux.OmitDetails))
 	return nil
 }
 
@@ -297,10 +303,10 @@ func (b *ContextBuilder) Build(plan *ScenePlan, sourceText, sourceSummary string
 	if snap := b.snapshotsBefore[refNodeID]; snap != nil {
 		return b.buildWithSnapshot(plan, sourceText, sourceSummary, refNodeID, snap)
 	}
-	if len(plan.SourceCandidateIDs()) == 0 {
+	if len(plan.CandidateIDs()) == 0 {
 		return &SceneContext{ScenePlan: plan, SourceText: sourceText, SourceSummary: sourceSummary, DramaticGoal: plan.Purpose}
 	}
-	refNodeID = plan.SourceCandidateIDs()[0]
+	refNodeID = plan.CandidateIDs()[0]
 	snap := b.snapshotsBefore[refNodeID]
 	if snap == nil {
 		return &SceneContext{ScenePlan: plan, SourceText: sourceText, SourceSummary: sourceSummary, DramaticGoal: plan.Purpose}

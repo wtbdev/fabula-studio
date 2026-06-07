@@ -24,11 +24,7 @@ const scenePlannerPrompt = `你是一名剧本结构专家。你决定 source-gr
 
 你将收到 SceneCandidate 列表。每个 candidate 都有稳定 id、source_sentence_ids、summary、dramatic_purpose、conflict、location、time_frame、characters。
 
-对每个候选节拍，决定它如何映射到场景：
-
-- scene_count: 0 = 仅摘要（背景交代，不在屏幕上展示）
-                1 = 单个场景
-                2+ = 多个场景（如果片段内地点/时间/冲突有显著变化）
+对每个候选节拍，决定它属于哪个剧本场景。一个 plan 永远对应一个最终场景，绝不能让一个 plan 代表多个生成场景；如果多个候选节拍发生在同一地点、时间、连续动作、同一戏剧目标内，可以合并进同一个 plan。
 - purpose: 该场景在整个故事中的戏剧目的
 - key_plot_points: 必须保留的关键情节点
 - omit_details: 为节奏考虑可删减的小说细节
@@ -41,8 +37,8 @@ const scenePlannerPrompt = `你是一名剧本结构专家。你决定 source-gr
 
 输出一个场景规划 JSON 数组，每个包含：
 - id: "plan_NNN"
-- source_node_ids: 涉及的 candidate ID 数组；必须使用 candidate ID，不要输出 beat ID 或 sentence ID
-- scene_count: 要生成的场景数量
+- source_candidate_ids: 涉及的 candidate ID 数组；必须使用 candidate ID，不要输出 beat ID、sentence ID、source_node_ids 或 sourceNodeIds
+- scene_count: 固定输出 1；即使输入要求多个场景也必须修正为 1
 - purpose: 戏剧目的
 - location: 主要地点
 - time_frame: 主要时间
@@ -50,7 +46,6 @@ const scenePlannerPrompt = `你是一名剧本结构专家。你决定 source-gr
 - key_plot_points: 必须保留的故事节拍
 - omit_details: 可删减的细节
 - sequence: 在完整剧本中的顺序（1, 2, 3...）
-- summary_only: 字符串；仅当 scene_count=0 时填写摘要文本，否则填空字符串 ""，不要输出布尔值
 
 只输出合法 JSON，不要 markdown 代码块，不要额外注释。`
 
@@ -86,7 +81,7 @@ func (a *ScenePlannerAgent) PlanFromCandidates(ctx context.Context, candidates [
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal scene candidates: %w", err)
 	}
-	prompt := fmt.Sprintf("Plan scenes for these source-grounded scene candidates. Use candidate IDs in source_node_ids:\n```json\n%s\n```", string(candidatesJSON))
+	prompt := fmt.Sprintf("Plan scenes for these source-grounded scene candidates. Use candidate IDs only in source_candidate_ids; do not emit source_node_ids/sourceNodeIds/sourceBeatIds. One plan writes exactly one scene, so every plan must have scene_count=1:\n```json\n%s\n```", string(candidatesJSON))
 
 	plans, err := a.runPlanPrompt(ctx, prompt)
 	if err != nil {
@@ -172,15 +167,16 @@ func normalizeValue(v interface{}) {
 }
 
 func normalizeScenePlanKeys(val map[string]interface{}) {
-	renameJSONKey(val, "sourceNodeIds", "source_node_ids")
-	renameJSONKey(val, "sourceBeatIds", "source_node_ids")
+	renameJSONKey(val, "sourceNodeIds", "source_candidate_ids")
+	renameJSONKey(val, "sourceCandidateIds", "source_candidate_ids")
+	renameJSONKey(val, "sourceBeatIds", "source_candidate_ids")
+	renameJSONKey(val, "source_node_ids", "source_candidate_ids")
 	renameJSONKey(val, "sceneCount", "scene_count")
 	renameJSONKey(val, "timeFrame", "time_frame")
 	renameJSONKey(val, "keyPlotPoints", "key_plot_points")
 	renameJSONKey(val, "omitDetails", "omit_details")
-	renameJSONKey(val, "summaryOnly", "summary_only")
 
-	for _, key := range []string{"source_node_ids", "characters", "key_plot_points", "omit_details"} {
+	for _, key := range []string{"source_candidate_ids", "characters", "key_plot_points", "omit_details"} {
 		if v, ok := val[key]; ok {
 			val[key] = normalizeStringList(v)
 		}

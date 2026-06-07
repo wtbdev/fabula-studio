@@ -7,20 +7,23 @@ import (
 	"github.com/fabula-studio/backend/internal/segment"
 )
 
-func TestScenePlanUnmarshalAcceptsSummaryOnlyBoolFalse(t *testing.T) {
+func TestScenePlanUnmarshalAcceptsLegacySourceNodeIDs(t *testing.T) {
 	var plan ScenePlan
-	data := []byte(`{"id":"plan_001","source_node_ids":["candidate_001"],"scene_count":1,"omit_details":["skip"],"summary_only":false}`)
+	data := []byte(`{"id":"plan_001","source_node_ids":["candidate_001"],"scene_count":3,"omit_details":["skip"]}`)
 	if err := json.Unmarshal(data, &plan); err != nil {
 		t.Fatalf("unmarshal scene plan: %v", err)
 	}
-	if plan.SummaryOnly != "" {
-		t.Fatalf("expected empty summary_only for false, got %q", plan.SummaryOnly)
+	if len(plan.SourceCandidateIDs) != 1 || plan.SourceCandidateIDs[0] != "candidate_001" {
+		t.Fatalf("expected legacy source_node_ids to populate source_candidate_ids, got %#v", plan.SourceCandidateIDs)
+	}
+	if plan.SceneCount != 1 {
+		t.Fatalf("expected scene_count repaired to 1, got %d", plan.SceneCount)
 	}
 }
 
 func TestScenePlanUnmarshalAcceptsOmitDetailsString(t *testing.T) {
 	var plan ScenePlan
-	data := []byte(`{"id":"plan_001","source_node_ids":["candidate_001"],"scene_count":1,"omit_details":"skip this"}`)
+	data := []byte(`{"id":"plan_001","source_candidate_ids":["candidate_001"],"scene_count":2,"omit_details":"skip this"}`)
 	if err := json.Unmarshal(data, &plan); err != nil {
 		t.Fatalf("unmarshal scene plan: %v", err)
 	}
@@ -61,9 +64,9 @@ func TestValidateAndRepairScenePlansAddsMissingCandidates(t *testing.T) {
 		{ID: "candidate_002", Summary: "second beat", DramaticPurpose: "escape", Characters: []string{"Ben"}, Location: "Tunnel"},
 	}
 	plans := []*ScenePlan{{
-		ID:            "",
-		SourceNodeIDs: []string{"candidate_001"},
-		SceneCount:    -1,
+		ID:                 "",
+		SourceCandidateIDs: []string{"candidate_001"},
+		SceneCount:         -1,
 	}}
 	repaired := ValidateAndRepairScenePlans(plans, candidates)
 	if len(repaired) != 2 {
@@ -72,7 +75,7 @@ func TestValidateAndRepairScenePlansAddsMissingCandidates(t *testing.T) {
 	if repaired[0].ID != "plan_001" || repaired[0].SceneCount != 1 || repaired[0].Purpose != "start" {
 		t.Fatalf("first plan not repaired from candidate: %#v", repaired[0])
 	}
-	if repaired[1].SourceCandidateIDs()[0] != "candidate_002" || repaired[1].Purpose != "escape" {
+	if repaired[1].SourceCandidateIDs[0] != "candidate_002" || repaired[1].Purpose != "escape" {
 		t.Fatalf("missing candidate not converted to plan: %#v", repaired[1])
 	}
 }
