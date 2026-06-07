@@ -1,18 +1,19 @@
-# Fabula Studio
+# Fabula Studio — 题目三：AI 小说转剧本工具
 
-AI 驱动的长篇小说转剧本工具。
+AI 辅助剧本创作工具，帮助小说作者将自己的作品改编成剧本，降低改编门槛，提升创作效率。
+
+输入 3 个章节以上的小说文本，系统自动转换为结构化剧本（YAML 格式），让作者可以快速获得可编辑、可进一步打磨的剧本初稿。
+
+> 演示视频：[百度网盘](https://pan.baidu.com/s/1NHJmnF76Zv5Wdxf6lcJ0Yg)
 
 ## 功能
 
-- **小说分析** — 自动提取角色、场景、情节结构
-- **剧本生成** — 基于故事节拍逐步生成结构化剧本
-- **递归故事树** — 超长文本分片理解，避免过载
-- **动态人物关系图** — 随剧情推进维护角色状态与关系
-- **场景上下文包** — 每场景只看到当前时间点之前的信息，防止剧透
-- **并行生成** — 场景级并行，支持大量场景快速产出
-- **可编辑工作台** — 在线编辑剧本、管理场次、导出多种格式
-- **原文阅读** — 对照原文查看改编依据
-- **全链路追踪** — Jaeger 集成，支持生成过程调试
+- **小说自动分析** — 输入完整小说文本，自动提取角色、场景、情节结构
+- **结构化剧本生成** — 基于故事节拍逐步生成剧本，支持大规模并行
+- **原文依据映射** — 每场剧本都标注了引用的原文章节，可对照阅读
+- **在线编辑工作台** — 浏览器内直接编辑剧本、管理场次、实时预览
+- **多格式导出** — 支持 YAML / TXT / Markdown / DOCX 导出
+- **全链路可观测** — Jaeger 集成，生成过程实时追踪
 
 ## 技术栈
 
@@ -24,7 +25,7 @@ AI 驱动的长篇小说转剧本工具。
 | 观测 | OpenTelemetry + Jaeger |
 | 打包 | Docker Compose (PostgreSQL + Jaeger + 前后端) |
 
-| AI | LLM Agent (OpenAI-compatible) + trpc-agent-go |
+## 快速开始
 
 ### 前置条件
 
@@ -109,6 +110,89 @@ docker compose up -d
 每步之间通过动态关系图传递角色状态，保证叙事连贯。
 
 详细架构参见 [`docs/novel-to-screenplay-architecture.md`](docs/novel-to-screenplay-architecture.md)。
+
+## 场景数据格式
+
+场景在系统内部以 JSON 存储，导出时转换为 YAML。以下为最终输出的完整结构。
+
+### 顶层结构
+
+```yaml
+metadata:
+  title: "剧本标题"              # 必需
+  author: "作者"                 # 必需
+  version: "1.0"                 # 必需
+  created_at: "2026-06-07"       # 必需
+  original_novel: "小说名称"      # 必需
+  logline: "一句话梗概"            # 必需
+  genre: ["类型1", "类型2"]       # 必需
+  source_chapters: [1, 2, 3]     # 可选，来源章节索引
+
+characters:
+  - id: "char_001"               # 必需，角色唯一标识
+    name: "角色名"                # 必需
+    intro: "角色介绍"              # 可选
+    gender: "男/女"               # 可选
+    age: 30                      # 可选
+    personality: ["关键词"]       # 可选
+    relationships:               # 可选
+      - target: "char_002"       # 必需（关系存在时）
+        type: "朋友/敌人"         # 必需
+        description: "描述"       # 可选
+
+scenes:
+  - id: "scene_001"              # 必需，场景唯一标识
+    sequence: 1                  # 必需，全剧顺序号
+    heading: "外景/内景 地点 - 时间" # 必需，场景标题
+    setting:
+      location: "地点"            # 必需
+      time: "时间"               # 必需
+      interior: true             # 必需，true=内景 false=外景
+    synopsis: "一句话概要"         # 必需
+    characters_present:           # 必需，至少 1 个
+      - "char_001"
+    content:                     # 必需，至少 1 条
+      - type: action             # 必需，"action" | "dialogue" | "transition" | "shot"
+        text: "动作描述"          # 必需
+      - type: dialogue
+        character: "char_001"    # 必需（dialogue 类型时）
+        parenthetical: "(轻声)"   # 可选，仅 dialogue
+        text: "对白内容"          # 必需
+      - type: transition
+        text: "切至："            # 必需
+```
+
+### 元素必要性说明
+
+| 路径 | 必要性 | 说明 |
+|---|---|---|
+| `metadata.title` | **必需** | 剧本标题 |
+| `metadata.author` | **必需** | 作者名 |
+| `metadata.version` | **必需** | 固定 `"1.0"` |
+| `metadata.created_at` | **必需** | 生成日期 |
+| `metadata.original_novel` | **必需** | 来源小说名称 |
+| `metadata.logline` | **必需** | 剧情梗概 |
+| `metadata.genre` | **必需** | 类型列表，至少 1 项 |
+| `metadata.source_chapters` | 可选 | 参考的原文章节索引 |
+| `characters[].id` | **必需** | 角色 ID，被 scenes 引用 |
+| `characters[].name` | **必需** | 角色全名 |
+| `characters[].intro` | 可选 | 角色外貌/性格简介 |
+| `characters[].gender` | 可选 | |
+| `characters[].age` | 可选 | |
+| `characters[].personality` | 可选 | 性格关键词 |
+| `characters[].relationships` | 可选 | 角色关系列表 |
+| `scenes[].id` | **必需** | 场景 ID，格式 `scene_NNN` |
+| `scenes[].sequence` | **必需** | 全剧顺序号，从 1 递增 |
+| `scenes[].heading` | **必需** | 标准场景标题 |
+| `scenes[].setting.location` | **必需** | 场景地点 |
+| `scenes[].setting.time` | **必需** | 场景时间 |
+| `scenes[].setting.interior` | **必需** | 内景/外景标识 |
+| `scenes[].synopsis` | **必需** | 一句话场景概要 |
+| `scenes[].characters_present` | **必需** | 出场角色 ID 列表 |
+| `scenes[].content[].type` | **必需** | 取值 `action` / `dialogue` / `transition` / `shot` |
+| `scenes[].content[].text` | **必需** | 内容正文 |
+| `scenes[].content[].character` | **dialogue 时必需** | 对白角色 ID |
+| `scenes[].content[].parenthetical` | 可选 | 对白括号提示，仅用于 `dialogue` |
 
 ## 环境变量
 
