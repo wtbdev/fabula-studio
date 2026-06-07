@@ -10,11 +10,11 @@ import (
 	"github.com/fabula-studio/backend/internal/segment"
 )
 
-// ScenePlan defines how a leaf node maps to screenplay scenes.
+// ScenePlan defines how source-grounded scene candidates map to screenplay scenes.
 type ScenePlan struct {
 	ID            string   `json:"id"`
-	SourceNodeIDs []string `json:"source_node_ids"`
-	SceneCount    int      `json:"scene_count"` // 0 = summary only, 1 = single scene, N = multiple
+	SourceNodeIDs []string `json:"source_node_ids"` // Backward-compatible JSON name; values are SceneCandidate IDs.
+	SceneCount    int      `json:"scene_count"`     // 0 = summary only, 1 = single scene, N = multiple
 	Purpose       string   `json:"purpose"`
 	Location      string   `json:"location"`
 	TimeFrame     string   `json:"time_frame"`
@@ -23,6 +23,14 @@ type ScenePlan struct {
 	OmitDetails   []string `json:"omit_details"`
 	Sequence      int      `json:"sequence"`
 	SummaryOnly   string   `json:"summary_only,omitempty"`
+}
+
+// SourceCandidateIDs returns the candidate IDs this plan covers.
+func (s *ScenePlan) SourceCandidateIDs() []string {
+	if s == nil {
+		return nil
+	}
+	return s.SourceNodeIDs
 }
 
 // SceneCandidate is the deterministic bridge from extracted story beats to LLM scene planning.
@@ -81,10 +89,10 @@ func ValidateAndRepairScenePlans(plans []*ScenePlan, candidates []SceneCandidate
 			continue
 		}
 		fixed := repairScenePlan(plan, len(repaired)+1, byID)
-		if len(fixed.SourceNodeIDs) == 0 {
+		if len(fixed.SourceCandidateIDs()) == 0 {
 			continue
 		}
-		for _, id := range fixed.SourceNodeIDs {
+		for _, id := range fixed.SourceCandidateIDs() {
 			usedCandidates[id] = struct{}{}
 		}
 		repaired = append(repaired, fixed)
@@ -124,7 +132,7 @@ func repairScenePlan(plan *ScenePlan, sequence int, candidates map[string]SceneC
 	fixed.Characters = compactStrings(fixed.Characters)
 	fixed.KeyPlotPoints = compactStrings(fixed.KeyPlotPoints)
 	fixed.OmitDetails = compactStrings(fixed.OmitDetails)
-	for _, sourceID := range fixed.SourceNodeIDs {
+	for _, sourceID := range fixed.SourceCandidateIDs() {
 		candidate, ok := candidates[sourceID]
 		if !ok {
 			continue
@@ -289,10 +297,10 @@ func (b *ContextBuilder) Build(plan *ScenePlan, sourceText, sourceSummary string
 	if snap := b.snapshotsBefore[refNodeID]; snap != nil {
 		return b.buildWithSnapshot(plan, sourceText, sourceSummary, refNodeID, snap)
 	}
-	if len(plan.SourceNodeIDs) == 0 {
+	if len(plan.SourceCandidateIDs()) == 0 {
 		return &SceneContext{ScenePlan: plan, SourceText: sourceText, SourceSummary: sourceSummary, DramaticGoal: plan.Purpose}
 	}
-	refNodeID = plan.SourceNodeIDs[0]
+	refNodeID = plan.SourceCandidateIDs()[0]
 	snap := b.snapshotsBefore[refNodeID]
 	if snap == nil {
 		return &SceneContext{ScenePlan: plan, SourceText: sourceText, SourceSummary: sourceSummary, DramaticGoal: plan.Purpose}
@@ -309,21 +317,25 @@ func (b *ContextBuilder) buildWithSnapshot(plan *ScenePlan, sourceText, sourceSu
 		DramaticGoal:  plan.Purpose,
 	}
 
-	// Populate character info
+	// Resolve plan character refs against the graph snapshot. Plans may carry either canonical IDs
+	// or source names; the graph remains the canonical registry exposed to the writer.
 	charSet := make(map[string]bool, len(plan.Characters))
-	for _, c := range plan.Characters {
-		charSet[c] = true
-	}
-	for _, cid := range plan.Characters {
-		if cs, ok := snap.Characters[cid]; ok {
-			ctx.Characters = append(ctx.Characters, CharacterInfo{
-				ID:             cs.ID,
-				Name:           cs.Name,
-				CurrentGoal:    cs.CurrentGoal,
-				EmotionalState: cs.EmotionalState,
-				Personality:    cs.Personality,
-			})
+	resolvedCharacterIDs := make([]string, 0, len(plan.Characters))
+	for _, ref := range plan.Characters {
+		cid := resolveCharacterID(snap, ref)
+		if cid == "" || charSet[cid] {
+			continue
 		}
+		charSet[cid] = true
+		resolvedCharacterIDs = append(resolvedCharacterIDs, cid)
+		cs := snap.Characters[cid]
+		ctx.Characters = append(ctx.Characters, CharacterInfo{
+			ID:             cs.ID,
+			Name:           cs.Name,
+			CurrentGoal:    cs.CurrentGoal,
+			EmotionalState: cs.EmotionalState,
+			Personality:    cs.Personality,
+		})
 	}
 
 	// Populate relations between present characters
@@ -337,7 +349,7 @@ func (b *ContextBuilder) buildWithSnapshot(plan *ScenePlan, sourceText, sourceSu
 	}
 
 	// Populate known facts for present characters
-	for _, cid := range plan.Characters {
+	for _, cid := range resolvedCharacterIDs {
 		if cs, ok := snap.Characters[cid]; ok {
 			ctx.KnownFacts = append(ctx.KnownFacts, cs.KnownInfo...)
 		}
@@ -359,7 +371,7 @@ func (b *ContextBuilder) buildWithSnapshot(plan *ScenePlan, sourceText, sourceSu
 	// Forbidden info: gather unknown_info from the AFTER snapshot for present characters.
 	// These are facts the characters don't yet know — the writer must not reveal them.
 	if afterSnap := b.snapshotsAfter[refNodeID]; afterSnap != nil {
-		for _, cid := range plan.Characters {
+		for _, cid := range resolvedCharacterIDs {
 			if cs, ok := afterSnap.Characters[cid]; ok {
 				ctx.ForbiddenInfo = append(ctx.ForbiddenInfo, cs.UnknownInfo...)
 			}
@@ -367,4 +379,20 @@ func (b *ContextBuilder) buildWithSnapshot(plan *ScenePlan, sourceText, sourceSu
 	}
 
 	return ctx
+}
+
+func resolveCharacterID(snap *graph.GraphSnapshot, ref string) string {
+	ref = strings.TrimSpace(ref)
+	if ref == "" || snap == nil {
+		return ""
+	}
+	if _, ok := snap.Characters[ref]; ok {
+		return ref
+	}
+	for id, cs := range snap.Characters {
+		if cs != nil && strings.TrimSpace(cs.Name) == ref {
+			return id
+		}
+	}
+	return ""
 }

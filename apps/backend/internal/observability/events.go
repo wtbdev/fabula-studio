@@ -41,6 +41,11 @@ type PipelineEvent struct {
 	Details   map[string]interface{} `json:"details,omitempty"`
 	Duration  *time.Duration         `json:"duration,omitempty"`
 	Error     string                 `json:"error,omitempty"`
+	ProjectID string                 `json:"projectId,omitempty"`
+	JobID     string                 `json:"jobId,omitempty"`
+	RunID     string                 `json:"runId,omitempty"`
+	TraceID   string                 `json:"traceId,omitempty"`
+	Progress  *int                   `json:"progress,omitempty"`
 }
 
 // EventBus manages SSE event distribution to connected clients.

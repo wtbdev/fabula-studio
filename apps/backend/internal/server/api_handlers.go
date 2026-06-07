@@ -446,6 +446,7 @@ func (s *Server) runGenerationJob(jobID, projectID, userID string) {
 		jobPipeline := pipeline.New(pipeline.DefaultConfig(), s.config.ModelName, s.config.APIKey, s.config.BaseURL, s.eventBus)
 		profile := adaptationProfileFromConfigJSON(p.ConfigJson)
 		convertCtx := schema.WithAdaptationProfile(ctx, &profile)
+		convertCtx = pipeline.WithRunMetadata(convertCtx, pipeline.RunMetadata{ProjectID: projectID, JobID: jobID})
 		done := make(chan struct{})
 		go s.persistGenerationProgress(ctx, jobID, jobPipeline, done)
 		sp, err := jobPipeline.Convert(convertCtx, p.Title, u.Nickname, splitChapters(p.SourceText))

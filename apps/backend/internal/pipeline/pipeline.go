@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -49,7 +50,6 @@ type PipelineResult struct {
 type Pipeline struct {
 	config             Config
 	unitAggregator     *agent.UnitAggregatorAgent
-	nodeAnalyzer       *agent.NodeAnalyzerAgent
 	graphAnalyzer      *agent.GraphAnalyzerAgent
 	storyBeatExtractor *agent.StoryBeatExtractorAgent
 	scenePlanner       *agent.ScenePlannerAgent
@@ -59,9 +59,10 @@ type Pipeline struct {
 	eventBus           *observability.EventBus
 	tracer             trace.Tracer
 
-	mu         sync.RWMutex
-	status     PipelineStatus
-	lastResult *PipelineResult
+	mu          sync.RWMutex
+	status      PipelineStatus
+	lastResult  *PipelineResult
+	runMetadata RunMetadata
 }
 
 // New creates a Pipeline with the given config and agent configuration.
@@ -69,7 +70,6 @@ func New(cfg Config, modelName, apiKey, baseURL string, eventBus *observability.
 	return &Pipeline{
 		config:             cfg,
 		unitAggregator:     agent.NewUnitAggregatorAgent(modelName, apiKey, baseURL),
-		nodeAnalyzer:       agent.NewNodeAnalyzerAgent(modelName, apiKey, baseURL),
 		graphAnalyzer:      agent.NewGraphAnalyzerAgent(modelName, apiKey, baseURL),
 		storyBeatExtractor: agent.NewStoryBeatExtractorAgent(modelName, apiKey, baseURL),
 		scenePlanner:       agent.NewScenePlannerAgent(modelName, apiKey, baseURL),
@@ -83,9 +83,40 @@ func New(cfg Config, modelName, apiKey, baseURL string, eventBus *observability.
 
 // publishEvent sends an event to the event bus if available.
 func (p *Pipeline) publishEvent(event observability.PipelineEvent) {
+	p.mu.RLock()
+	meta := p.runMetadata
+	progress := p.status.Progress
+	p.mu.RUnlock()
+
+	if event.ProjectID == "" {
+		event.ProjectID = meta.ProjectID
+	}
+	if event.JobID == "" {
+		event.JobID = meta.JobID
+	}
+	if event.RunID == "" {
+		event.RunID = meta.RunID
+	}
+	if event.TraceID == "" {
+		event.TraceID = meta.TraceID
+	}
+	if event.Progress == nil {
+		event.Progress = intPtr(progress)
+	}
 	if p.eventBus != nil {
 		p.eventBus.Publish(event)
 	}
+}
+
+func intPtr(v int) *int {
+	return &v
+}
+
+func setPipelineStepAttributes(span trace.Span, step string, progress int) {
+	span.SetAttributes(
+		attribute.String("pipeline.step", step),
+		attribute.Int("pipeline.progress", progress),
+	)
 }
 
 // Status returns the current pipeline status (thread-safe).
@@ -123,12 +154,17 @@ func (p *Pipeline) Convert(ctx context.Context, title, author string, chapters [
 		author = "未知作者"
 	}
 	profile, hasProfile := schema.AdaptationProfileFromContext(ctx)
+	meta, _ := RunMetadataFromContext(ctx)
+	if meta.RunID == "" {
+		meta.RunID = uuid.NewString()
+	}
 
 	startTime := time.Now()
 
 	p.mu.Lock()
 	p.status = PipelineStatus{State: "running", StartedAt: startTime}
 	p.lastResult = nil
+	p.runMetadata = meta
 	p.mu.Unlock()
 
 	if p.eventBus != nil {
@@ -137,6 +173,26 @@ func (p *Pipeline) Convert(ctx context.Context, title, author string, chapters [
 
 	// Start tracing span
 	ctx, span := p.tracer.Start(ctx, "pipeline.convert")
+	span.SetAttributes(
+		attribute.String("pipeline.title", title),
+		attribute.String("pipeline.author", author),
+		attribute.Int("pipeline.chapters_count", len(chapters)),
+		attribute.String("pipeline.run_id", meta.RunID),
+		attribute.String("pipeline.step", "pipeline"),
+		attribute.Int("pipeline.progress", 0),
+	)
+	if meta.ProjectID != "" {
+		span.SetAttributes(attribute.String("project.id", meta.ProjectID))
+	}
+	if meta.JobID != "" {
+		span.SetAttributes(attribute.String("generation.job_id", meta.JobID))
+	}
+	if spanContext := span.SpanContext(); spanContext.IsValid() {
+		meta.TraceID = spanContext.TraceID().String()
+		p.mu.Lock()
+		p.runMetadata = meta
+		p.mu.Unlock()
+	}
 	defer span.End()
 
 	p.publishEvent(observability.PipelineEvent{
@@ -160,6 +216,7 @@ func (p *Pipeline) Convert(ctx context.Context, title, author string, chapters [
 	// Step 1: Build the source index and extract adaptation story beats.
 	stepStart := time.Now()
 	ctx, beatSpan := p.tracer.Start(ctx, "pipeline.extract_story_beats")
+	setPipelineStepAttributes(beatSpan, "extract_story_beats", 5)
 	p.publishEvent(observability.PipelineEvent{
 		Type:    observability.EventNodeAnalyzing,
 		Step:    "extract_story_beats",
@@ -215,56 +272,69 @@ func (p *Pipeline) Convert(ctx context.Context, title, author string, chapters [
 	// Step 2-3: Aggregate the same sentence stream into the legacy story tree.
 	stepStart = time.Now()
 	ctx, treeSpan := p.tracer.Start(ctx, "pipeline.aggregate_units")
+	setPipelineStepAttributes(treeSpan, "aggregate_units", 15)
 	p.publishEvent(observability.PipelineEvent{
 		Type:    observability.EventNodeAnalyzing,
 		Step:    "aggregate_units",
 		Message: "步骤 2/8: 聚合剧情单元...",
 	})
-	st, err := p.buildTreeFromSentences(ctx, sourceIndex.Sentences)
-	if err != nil {
-		treeSpan.RecordError(err)
+	st, treeErr := p.buildTreeFromSentences(ctx, sourceIndex.Sentences)
+	if treeErr != nil {
+		treeSpan.RecordError(treeErr)
 		treeSpan.End()
-		p.mu.Lock()
-		p.status.State = "failed"
-		p.status.Error = err.Error()
-		p.mu.Unlock()
 		p.publishEvent(observability.PipelineEvent{
-			Type:  observability.EventError,
-			Step:  "aggregate_units",
-			Error: err.Error(),
+			Type:    observability.EventNodeFailed,
+			Step:    "aggregate_units",
+			Message: "剧情单元聚合失败，继续使用故事节拍主线生成",
+			Error:   treeErr.Error(),
 		})
-		return nil, fmt.Errorf("unit aggregation failed: %w", err)
-	}
-	treeSpan.End()
-	st.UpdateLeafIDs()
+	} else {
+		treeSpan.End()
+		st.UpdateLeafIDs()
 
-	// Emit the complete aggregated tree so the frontend can render it immediately.
-	p.publishEvent(observability.PipelineEvent{
-		Type:     observability.EventTreeSnapshot,
-		Step:     "aggregate_units",
-		Message:  fmt.Sprintf("剧情单元聚合完成: %d 节点, %d 叶子", len(st.Nodes), len(st.LeafNodeIDs)),
-		Duration: durationPtr(time.Since(stepStart)),
-		Details: map[string]interface{}{
-			"tree":        st,
-			"total_nodes": len(st.Nodes),
-			"leaf_nodes":  len(st.LeafNodeIDs),
-		},
-	})
+		// Emit the complete aggregated tree so the frontend can render it immediately.
+		p.publishEvent(observability.PipelineEvent{
+			Type:     observability.EventTreeSnapshot,
+			Step:     "aggregate_units",
+			Message:  fmt.Sprintf("剧情单元聚合完成: %d 节点, %d 叶子", len(st.Nodes), len(st.LeafNodeIDs)),
+			Duration: durationPtr(time.Since(stepStart)),
+			Details: map[string]interface{}{
+				"tree":        st,
+				"total_nodes": len(st.Nodes),
+				"leaf_nodes":  len(st.LeafNodeIDs),
+			},
+		})
+	}
 
 	p.mu.Lock()
 	p.status.CurrentStep = "update_graph"
 	p.status.Progress = 40
 	p.mu.Unlock()
 
-	// Step 7: Update dynamic graph
 	stepStart = time.Now()
 	ctx, graphSpan := p.tracer.Start(ctx, "pipeline.update_graph")
+	setPipelineStepAttributes(graphSpan, "update_graph", 40)
 	p.publishEvent(observability.PipelineEvent{
 		Type:    observability.EventGraphUpdating,
 		Step:    "update_graph",
 		Message: "步骤 4/8: 更新动态图...",
 	})
-	graphMgr, err := p.updateGraph(ctx, st)
+	// Step 7: Update the dynamic graph on the same source-grounded timeline used for scene planning.
+	sceneCandidates := scene.BuildSceneCandidates(storyBeats)
+	if len(sceneCandidates) == 0 {
+		graphSpan.End()
+		p.mu.Lock()
+		p.status.State = "failed"
+		p.status.Error = "no scene candidates produced"
+		p.mu.Unlock()
+		p.publishEvent(observability.PipelineEvent{
+			Type:  observability.EventError,
+			Step:  "update_graph",
+			Error: "no scene candidates produced",
+		})
+		return nil, fmt.Errorf("graph update failed: no scene candidates produced")
+	}
+	graphMgr, err := p.updateGraphFromCandidates(ctx, sourceIndex, sceneCandidates)
 	if err != nil {
 		graphSpan.RecordError(err)
 		graphSpan.End()
@@ -281,7 +351,7 @@ func (p *Pipeline) Convert(ctx context.Context, title, author string, chapters [
 	}
 	graphSpan.End()
 	graphChars := 0
-	if afterSnap := graphMgr.SnapshotsAfter()[st.LeafNodeIDs[len(st.LeafNodeIDs)-1]]; afterSnap != nil {
+	if afterSnap := graphMgr.SnapshotsAfter()[sceneCandidates[len(sceneCandidates)-1].ID]; afterSnap != nil {
 		graphChars = len(afterSnap.Characters)
 	}
 	p.publishEvent(observability.PipelineEvent{
@@ -301,14 +371,8 @@ func (p *Pipeline) Convert(ctx context.Context, title, author string, chapters [
 
 	// Step 8: Plan scenes
 	stepStart = time.Now()
-	leaves := make([]*tree.StoryNode, 0, len(st.LeafNodeIDs))
-	for _, lid := range st.LeafNodeIDs {
-		if n := st.GetNode(lid); n != nil {
-			leaves = append(leaves, n)
-		}
-	}
-	sceneCandidates := scene.BuildSceneCandidates(storyBeats)
 	ctx, planSpan := p.tracer.Start(ctx, "pipeline.plan_scenes")
+	setPipelineStepAttributes(planSpan, "plan_scenes", 55)
 	p.publishEvent(observability.PipelineEvent{
 		Type:    observability.EventScenePlanning,
 		Step:    "plan_scenes",
@@ -329,15 +393,29 @@ func (p *Pipeline) Convert(ctx context.Context, title, author string, chapters [
 		})
 		return nil, fmt.Errorf("scene planning failed: %w", err)
 	}
+	if err := validatePlanGrounding(plans, sceneCandidates); err != nil {
+		planSpan.RecordError(err)
+		planSpan.End()
+		p.mu.Lock()
+		p.status.State = "failed"
+		p.status.Error = err.Error()
+		p.mu.Unlock()
+		p.publishEvent(observability.PipelineEvent{
+			Type:  observability.EventError,
+			Step:  "plan_scenes",
+			Error: err.Error(),
+		})
+		return nil, fmt.Errorf("scene plan grounding failed: %w", err)
+	}
 	planSpan.End()
 	planSummaries := make([]map[string]interface{}, len(plans))
 	for i, plan := range plans {
 		planSummaries[i] = map[string]interface{}{
-			"id":              plan.ID,
-			"source_node_ids": plan.SourceNodeIDs,
-			"scene_count":     plan.SceneCount,
-			"purpose":         plan.Purpose,
-			"location":        plan.Location,
+			"id":                   plan.ID,
+			"source_candidate_ids": plan.SourceCandidateIDs(),
+			"scene_count":          plan.SceneCount,
+			"purpose":              plan.Purpose,
+			"location":             plan.Location,
 		}
 	}
 	p.publishEvent(observability.PipelineEvent{
@@ -359,12 +437,13 @@ func (p *Pipeline) Convert(ctx context.Context, title, author string, chapters [
 	// Step 9-10: Generate scenes
 	stepStart = time.Now()
 	ctx, writeSpan := p.tracer.Start(ctx, "pipeline.generate_scenes")
+	setPipelineStepAttributes(writeSpan, "generate_scenes", 65)
 	p.publishEvent(observability.PipelineEvent{
 		Type:    observability.EventSceneWriting,
 		Step:    "generate_scenes",
 		Message: "步骤 6/8: 生成场景...",
 	})
-	scenes, err := p.generateScenesSequential(ctx, plans, sourceIndex, sceneCandidates, st, graphMgr)
+	scenes, err := p.generateScenesSequential(ctx, plans, sourceIndex, sceneCandidates, graphMgr)
 	if err != nil {
 		writeSpan.RecordError(err)
 		writeSpan.End()
@@ -401,10 +480,8 @@ func (p *Pipeline) Convert(ctx context.Context, title, author string, chapters [
 	p.mu.Unlock()
 
 	// Assemble screenplay
-	genre := []string{}
-	if len(leaves) > 0 && leaves[0].Summary != "" {
-		genre = []string{"剧情"}
-	}
+	finalGraph := graphMgr.SnapshotsAfter()[sceneCandidates[len(sceneCandidates)-1].ID]
+	genre := []string{"剧情"}
 	sourceChapters := make([]int, len(chapters))
 	for i := range chapters {
 		sourceChapters[i] = i + 1
@@ -420,25 +497,35 @@ func (p *Pipeline) Convert(ctx context.Context, title, author string, chapters [
 			Genre:          genre,
 			SourceChapters: sourceChapters,
 		},
-		Characters: p.collectCharacters(leaves),
+		Characters: collectCharactersFromGraph(finalGraph),
 		Scenes:     scenes,
 	}
+
+	artifacts := generationArtifacts(sourceIndex, storyBeats, plans, finalGraph)
 
 	// Step 12: Chief editor review
 	stepStart = time.Now()
 	ctx, editorSpan := p.tracer.Start(ctx, "pipeline.editor_review")
+	setPipelineStepAttributes(editorSpan, "editor_review", 80)
 	p.publishEvent(observability.PipelineEvent{
 		Type:    observability.EventEditorReviewing,
 		Step:    "editor_review",
 		Message: "步骤 7/8: 总编审查...",
 	})
-	editResult, err := p.chiefEditor.ReviewAndRevise(ctx, screenplay)
+	editResult, err := p.chiefEditor.ReviewAndRevise(ctx, screenplay, artifacts)
 	if err != nil {
 		editorSpan.RecordError(err)
+		if artifacts != nil {
+			artifacts.Warnings = append(artifacts.Warnings, schema.GenerationWarning{
+				Code:    "editor_review_failed",
+				Message: err.Error(),
+				Source:  "chief-editor",
+			})
+		}
 		p.publishEvent(observability.PipelineEvent{
 			Type:    observability.EventEditorReviewed,
 			Step:    "editor_review",
-			Message: fmt.Sprintf("总编审查失败 (非致命): %v", err),
+			Message: fmt.Sprintf("总编审查失败，保留原剧本: %v", err),
 			Error:   err.Error(),
 		})
 	} else {
@@ -468,6 +555,7 @@ func (p *Pipeline) Convert(ctx context.Context, title, author string, chapters [
 	// Step 13: Validation
 	stepStart = time.Now()
 	ctx, validSpan := p.tracer.Start(ctx, "pipeline.validation")
+	setPipelineStepAttributes(validSpan, "validation", 90)
 	p.publishEvent(observability.PipelineEvent{
 		Type:    observability.EventValidation,
 		Step:    "validation",
@@ -475,14 +563,24 @@ func (p *Pipeline) Convert(ctx context.Context, title, author string, chapters [
 	})
 	validateResult := p.validator.Validate(screenplay, 3)
 	if !validateResult.Valid {
-		// Log validation errors but continue - return result with warnings
+		validationErr := fmt.Errorf("screenplay validation failed: %s", strings.Join(validateResult.Errors, "; "))
+		validSpan.RecordError(validationErr)
+		validSpan.End()
+		p.mu.Lock()
+		p.status.State = "failed"
+		p.status.Error = validationErr.Error()
+		p.mu.Unlock()
 		p.publishEvent(observability.PipelineEvent{
-			Type:    observability.EventValidation,
+			Type:    observability.EventError,
 			Step:    "validation",
-			Message: fmt.Sprintf("校验警告: %s", strings.Join(validateResult.Errors, "; ")),
+			Message: "校验失败",
+			Error:   validationErr.Error(),
+			Details: map[string]interface{}{
+				"errors":   validateResult.Errors,
+				"warnings": validateResult.Warnings,
+			},
 		})
-		// Add errors as warnings instead of failing
-		validateResult.Warnings = append(validateResult.Warnings, validateResult.Errors...)
+		return nil, validationErr
 	}
 	validSpan.End()
 	p.publishEvent(observability.PipelineEvent{
@@ -507,7 +605,7 @@ func (p *Pipeline) Convert(ctx context.Context, title, author string, chapters [
 		Tree:        st,
 		GraphMgr:    graphMgr,
 		Plans:       plans,
-		Artifacts:   generationArtifacts(sourceIndex, storyBeats, plans, graphMgr),
+		Artifacts:   artifacts,
 		Screenplay:  screenplay,
 		YAMLStr:     string(yamlBytes),
 		Duration:    totalDuration,
@@ -562,262 +660,63 @@ func (p *Pipeline) buildTreeFromSentences(ctx context.Context, sentences []segme
 	return segment.BuildTree(sentences, units)
 }
 
-// analyzeNodes recursively analyzes and refines the story tree (Steps 4-6).
-func (p *Pipeline) analyzeNodes(ctx context.Context, st *tree.StoryTree, depth int) error {
-	if depth >= p.config.MaxRecursionDepth {
-		fmt.Printf("[Pipeline] Max recursion depth %d reached\n", p.config.MaxRecursionDepth)
-		return nil
+// updateGraphFromCandidates builds the dynamic graph across source-grounded scene candidates.
+// Candidate IDs are the authoritative timeline keys for scene planning and context assembly.
+func (p *Pipeline) updateGraphFromCandidates(ctx context.Context, sourceIndex *segment.SourceIndex, candidates []scene.SceneCandidate) (*graph.Manager, error) {
+	if len(candidates) == 0 {
+		return nil, fmt.Errorf("no scene candidates to update graph")
 	}
-
-	cm := tree.NewChainManager(st)
-	nodesToSplit := make([]*tree.StoryNode, 0)
-
-	// Find leaf nodes that haven't been analyzed yet
-	for _, node := range st.Nodes {
-		if node.Level < 0 { // skip root
-			continue
-		}
-		if len(node.ChildrenIDs) > 0 { // already split
-			continue
-		}
-		if node.Summary != "" { // already analyzed
-			continue
-		}
-
-		// Check if we should merge right first
-		if cm.ShouldMergeRight(node) {
-			right := cm.GetRightNeighbor(node.ID)
-			if right != nil && right.Summary == "" {
-				// Merge the nodes
-				merged := cm.MergeNodes(node, right)
-				node.TextContent = merged.TextContent
-				node.RightNeighbor = merged.RightNeighbor
-				fmt.Printf("[Pipeline] Merged %s + %s (truncation detected)\n", node.ID, right.ID)
-			}
-		}
-
-		// Analyze the node with tracing
-		leftSummary := ""
-		left := cm.GetLeftNeighbor(node.ID)
-		if left != nil {
-			leftSummary = left.Summary
-		}
-
-		// Start span for this node
-		nodeSpanName := fmt.Sprintf("pipeline.analyze_node.%s", node.ID)
-		_, nodeSpan := p.tracer.Start(ctx, nodeSpanName)
-		nodeSpan.SetAttributes(
-			attribute.String("node.id", node.ID),
-			attribute.Int("node.level", node.Level),
-			attribute.Int("node.text_length", len(node.TextContent)),
-		)
-
-		p.publishEvent(observability.PipelineEvent{
-			Type:    observability.EventNodeAnalyzing,
-			Step:    "analyze_node",
-			NodeID:  node.ID,
-			Message: fmt.Sprintf("分析节点 %s...", node.ID),
-		})
-
-		result, err := p.retryAnalyze(ctx, node, leftSummary)
-		if err != nil {
-			nodeSpan.RecordError(err)
-			nodeSpan.End()
-			p.publishEvent(observability.PipelineEvent{
-				Type:   observability.EventNodeFailed,
-				Step:   "analyze_node",
-				NodeID: node.ID,
-				Error:  err.Error(),
-			})
-			node.Decision = tree.DecisionSummarizeOnly
-			continue
-		}
-		nodeSpan.End()
-
-		// Apply analysis results
-		node.Summary = result.Summary
-		node.MainConflict = result.MainConflict
-		node.Characters = result.Characters
-		node.Events = result.Events
-		node.Location = result.Location
-		node.TimeFrame = result.TimeFrame
-		node.IsComplete = result.IsComplete
-		node.SplitReason = result.SplitReason
-
-		switch result.Decision {
-		case "keep":
-			node.Decision = tree.DecisionKeep
-		case "split":
-			node.Decision = tree.DecisionSplit
-			nodesToSplit = append(nodesToSplit, node)
-		case "merge_right":
-			node.Decision = tree.DecisionMergeRight
-			// Already handled merge above; if still merge_right, mark as keep
-			if node.RightNeighbor == "" {
-				node.Decision = tree.DecisionKeep
-			}
-		case "summarize_only":
-			node.Decision = tree.DecisionSummarizeOnly
-		case "discard":
-			node.Decision = tree.DecisionDiscard
-		default:
-			node.Decision = tree.DecisionKeep
-		}
-
-		p.publishEvent(observability.PipelineEvent{
-			Type:    observability.EventNodeAnalyzed,
-			Step:    "analyze_node",
-			NodeID:  node.ID,
-			Message: fmt.Sprintf("节点 %s 分析完成: %s", node.ID, node.Decision),
-			Details: map[string]interface{}{
-				"node": node,
-			},
-		})
-	}
-
-	// Split nodes that need further decomposition
-	for _, node := range nodesToSplit {
-		p.splitNode(st, node)
-	}
-
-	// Recurse if any splits happened
-	if len(nodesToSplit) > 0 {
-		return p.analyzeNodes(ctx, st, depth+1)
-	}
-
-	return nil
-}
-
-// splitNode divides a node into child nodes and emits events for each.
-func (p *Pipeline) splitNode(st *tree.StoryTree, node *tree.StoryNode) {
-	splitter := tree.NewSplitter(p.config.MaxChunkSize / 2)
-	chunks := splitter.SplitChapters([]string{node.TextContent})
-	leaves := chunks.CollectLeaves()
-
-	// Re-ID to avoid collisions: parentID_c001, parentID_c002, ...
-	oldToNew := make(map[string]string, len(leaves))
-	for i, child := range leaves {
-		oldID := child.ID
-		newID := fmt.Sprintf("%s_c%03d", node.ID, i+1)
-		delete(st.Nodes, oldID)
-		child.ID = newID
-		oldToNew[oldID] = newID
-	}
-	// Fix RightNeighbor references
-	for _, child := range leaves {
-		if child.RightNeighbor != "" {
-			if newRN, ok := oldToNew[child.RightNeighbor]; ok {
-				child.RightNeighbor = newRN
-			}
-		}
-	}
-
-	node.ChildrenIDs = make([]string, 0, len(leaves))
-	for _, child := range leaves {
-		child.ParentID = node.ID
-		child.Level = node.Level + 1
-		child.SourceChapter = node.SourceChapter
-		st.AddNode(child)
-		node.ChildrenIDs = append(node.ChildrenIDs, child.ID)
-
-		p.publishEvent(observability.PipelineEvent{
-			Type:    observability.EventTreeNodeAdded,
-			Step:    "analyze_node",
-			NodeID:  child.ID,
-			Message: fmt.Sprintf("节点拆分: %s → %s", node.ID, child.ID),
-			Details: map[string]interface{}{
-				"node": child,
-			},
-		})
-	}
-}
-
-// retryAnalyze attempts node analysis with retries.
-func (p *Pipeline) retryAnalyze(ctx context.Context, node *tree.StoryNode, leftSummary string) (*agent.NodeAnalysisResult, error) {
-	var lastErr error
-	for i := 0; i < p.config.MaxRetries; i++ {
-		result, err := p.nodeAnalyzer.Analyze(ctx, node, leftSummary)
-		if err == nil {
-			return result, nil
-		}
-		lastErr = err
-		fmt.Printf("[Pipeline] Retry %d/%d for node %s: %v\n", i+1, p.config.MaxRetries, node.ID, err)
-	}
-	return nil, lastErr
-}
-
-// updateGraph builds the dynamic graph across all leaf nodes (Step 7).
-func (p *Pipeline) updateGraph(ctx context.Context, st *tree.StoryTree) (*graph.Manager, error) {
 	graphMgr := graph.NewManager()
-	graphMgr.SetInitialSnapshot(st.LeafNodeIDs[0], graph.NewSnapshot(st.LeafNodeIDs[0]))
+	graphMgr.SetInitialSnapshot(candidates[0].ID, graph.NewSnapshot(candidates[0].ID))
 
-	for i, leafID := range st.LeafNodeIDs {
-		node := st.GetNode(leafID)
-		if node == nil {
-			continue
-		}
-
-		// Skip nodes that don't need graph tracking
-		if node.Decision == tree.DecisionSummarizeOnly || node.Decision == tree.DecisionDiscard {
-			fmt.Printf("[Pipeline] Skipping graph update for %s (decision: %s)\n", leafID, node.Decision)
-			if i+1 < len(st.LeafNodeIDs) {
-				beforeSnap := graphMgr.SnapshotsBefore()[leafID]
-				if beforeSnap == nil {
-					beforeSnap = graph.NewSnapshot(leafID)
-				}
-				graphMgr.SetInitialSnapshot(st.LeafNodeIDs[i+1], beforeSnap.Clone())
-			}
-			continue
-		}
-
-		beforeSnap := graphMgr.SnapshotsBefore()[leafID]
+	failedUpdates := 0
+	successfulUpdates := 0
+	for i, candidate := range candidates {
+		beforeSnap := graphMgr.SnapshotsBefore()[candidate.ID]
 		if beforeSnap == nil {
-			beforeSnap = graph.NewSnapshot(leafID)
+			beforeSnap = graph.NewSnapshot(candidate.ID)
+			graphMgr.SetInitialSnapshot(candidate.ID, beforeSnap)
 		}
 
-		// Use summary instead of full text to avoid token overflow
-		graphText := node.Summary
-		if graphText == "" {
-			graphText = node.TextContent
-			// Truncate if still too long
-			runes := []rune(graphText)
-			if len(runes) > 1500 {
-				graphText = string(runes[:1500]) + "..."
-			}
+		graphText := sourceIndex.TextForIDs(candidate.SourceSentenceIDs)
+		if strings.TrimSpace(graphText) == "" {
+			graphText = candidate.Summary
 		}
 
-		// Start span for this node's graph update
-		graphSpanName := fmt.Sprintf("pipeline.graph_update.%s", leafID)
+		graphSpanName := fmt.Sprintf("pipeline.graph_update.%s", candidate.ID)
 		_, graphNodeSpan := p.tracer.Start(ctx, graphSpanName)
 		graphNodeSpan.SetAttributes(
-			attribute.String("node.id", leafID),
-			attribute.Int("node.index", i),
+			attribute.String("scene_candidate.id", candidate.ID),
+			attribute.Int("scene_candidate.index", i),
 		)
 
 		p.publishEvent(observability.PipelineEvent{
 			Type:    observability.EventGraphUpdating,
 			Step:    "graph_update",
-			NodeID:  leafID,
-			Message: fmt.Sprintf("图更新: %s (%d/%d)", leafID, i+1, len(st.LeafNodeIDs)),
+			NodeID:  candidate.ID,
+			Message: fmt.Sprintf("图更新: %s (%d/%d)", candidate.ID, i+1, len(candidates)),
 		})
 
 		update, err := p.graphAnalyzer.AnalyzeUpdate(ctx, graphText, beforeSnap)
 		if err != nil {
+			failedUpdates++
 			graphNodeSpan.RecordError(err)
 			graphNodeSpan.End()
 			p.publishEvent(observability.PipelineEvent{
 				Type:   observability.EventGraphUpdated,
 				Step:   "graph_update",
-				NodeID: leafID,
+				NodeID: candidate.ID,
 				Error:  err.Error(),
 			})
-			if i+1 < len(st.LeafNodeIDs) {
-				graphMgr.SetInitialSnapshot(st.LeafNodeIDs[i+1], beforeSnap.Clone())
+			graphMgr.SetAfterSnapshot(candidate.ID, beforeSnap)
+			if i+1 < len(candidates) {
+				graphMgr.ChainSnapshot(candidate.ID, candidates[i+1].ID)
 			}
 			continue
 		}
 
-		graphMgr.ApplyUpdate(leafID, update)
+		graphMgr.ApplyUpdate(candidate.ID, update)
+		successfulUpdates++
 		graphNodeSpan.End()
 
 		newCharNames := make([]string, len(update.NewCharacters))
@@ -832,47 +731,41 @@ func (p *Pipeline) updateGraph(ctx context.Context, st *tree.StoryTree) (*graph.
 		p.publishEvent(observability.PipelineEvent{
 			Type:    observability.EventGraphUpdated,
 			Step:    "graph_update",
-			NodeID:  leafID,
-			Message: fmt.Sprintf("图更新完成: %s", leafID),
+			NodeID:  candidate.ID,
+			Message: fmt.Sprintf("图更新完成: %s", candidate.ID),
 			Details: map[string]interface{}{
 				"new_characters": newCharNames,
 				"new_relations":  newRelDescs,
 			},
 		})
 
-		// Chain to next node
-		if i+1 < len(st.LeafNodeIDs) {
-			graphMgr.ChainSnapshot(leafID, st.LeafNodeIDs[i+1])
+		if i+1 < len(candidates) {
+			graphMgr.ChainSnapshot(candidate.ID, candidates[i+1].ID)
 		}
+	}
+
+	if successfulUpdates == 0 {
+		return nil, fmt.Errorf("graph update failed for all %d scene candidates", len(candidates))
+	}
+	if finalSnap := graphMgr.SnapshotsAfter()[candidates[len(candidates)-1].ID]; finalSnap == nil || len(finalSnap.Characters) == 0 {
+		return nil, fmt.Errorf("graph update produced no characters after %d candidates (%d failed)", len(candidates), failedUpdates)
 	}
 
 	return graphMgr, nil
 }
 
-// generateScenesSequential writes scenes in plan order and updates the graph from each generated scene.
-func (p *Pipeline) generateScenesSequential(ctx context.Context, plans []*scene.ScenePlan, sourceIndex *segment.SourceIndex, candidates []scene.SceneCandidate, st *tree.StoryTree, graphMgr *graph.Manager) ([]schema.Scene, error) {
+// generateScenesSequential writes scenes in plan order using source-grounded graph snapshots.
+func (p *Pipeline) generateScenesSequential(ctx context.Context, plans []*scene.ScenePlan, sourceIndex *segment.SourceIndex, candidates []scene.SceneCandidate, graphMgr *graph.Manager) ([]schema.Scene, error) {
 	candidateByID := make(map[string]scene.SceneCandidate, len(candidates))
 	for _, candidate := range candidates {
 		candidateByID[candidate.ID] = candidate
 	}
 
-	current := finalGraphSnapshot(graphMgr, st)
-	if current == nil {
-		current = graph.NewSnapshot("scene_generation_start")
-	}
 	ctxBuilder := scene.NewContextBuilder(graphMgr.SnapshotsBefore(), graphMgr.SnapshotsAfter())
 	result := make([]schema.Scene, 0, len(plans))
 
 	for _, plan := range plans {
-		if plan == nil {
-			continue
-		}
-		before := current.Clone()
-		before.NodeID = plan.ID
-		graphMgr.SetInitialSnapshot(plan.ID, before)
-		if plan.SceneCount == 0 {
-			graphMgr.SetAfterSnapshot(plan.ID, before)
-			current = before
+		if plan == nil || plan.SceneCount == 0 {
 			continue
 		}
 
@@ -904,18 +797,6 @@ func (p *Pipeline) generateScenesSequential(ctx context.Context, plans []*scene.
 		if sc.ID == "" {
 			sc.ID = fmt.Sprintf("scene_%03d", sc.Sequence)
 		}
-
-		graphMgr.SetInitialSnapshot(sc.ID, before)
-		update, err := p.graphAnalyzer.AnalyzeSceneUpdate(ctx, sc, before)
-		if err != nil {
-			sceneSpan.RecordError(err)
-			sceneSpan.End()
-			p.publishEvent(observability.PipelineEvent{Type: observability.EventGraphUpdated, Step: "graph_hook", NodeID: sc.ID, Error: err.Error()})
-			return nil, fmt.Errorf("scene %d graph update: %w", sc.Sequence, err)
-		}
-		after := graphMgr.ApplyUpdate(sc.ID, update)
-		graphMgr.SetAfterSnapshot(plan.ID, after)
-		current = after
 		sceneSpan.End()
 
 		result = append(result, *sc)
@@ -925,18 +806,48 @@ func (p *Pipeline) generateScenesSequential(ctx context.Context, plans []*scene.
 			NodeID:  plan.ID,
 			Message: fmt.Sprintf("场景 %d 完成", sc.Sequence),
 			Details: map[string]interface{}{
-				"graph_before": plan.ID,
-				"graph_after":  sc.ID,
+				"source_candidate_ids": plan.SourceCandidateIDs(),
 			},
 		})
 	}
 	return result, nil
 }
 
+func validatePlanGrounding(plans []*scene.ScenePlan, candidates []scene.SceneCandidate) error {
+	if len(candidates) == 0 {
+		return fmt.Errorf("no scene candidates available for planning")
+	}
+	candidateIDs := make(map[string]struct{}, len(candidates))
+	covered := make(map[string]struct{}, len(candidates))
+	for _, candidate := range candidates {
+		candidateIDs[candidate.ID] = struct{}{}
+	}
+	for _, plan := range plans {
+		if plan == nil {
+			continue
+		}
+		if len(plan.SourceCandidateIDs()) == 0 {
+			return fmt.Errorf("plan %q has no source candidate IDs", plan.ID)
+		}
+		for _, id := range plan.SourceCandidateIDs() {
+			if _, ok := candidateIDs[id]; !ok {
+				return fmt.Errorf("plan %q references unknown source candidate %q", plan.ID, id)
+			}
+			covered[id] = struct{}{}
+		}
+	}
+	for _, candidate := range candidates {
+		if _, ok := covered[candidate.ID]; !ok {
+			return fmt.Errorf("source candidate %q is not covered by any scene plan", candidate.ID)
+		}
+	}
+	return nil
+}
+
 func sourceContextForPlan(sourceIndex *segment.SourceIndex, candidates map[string]scene.SceneCandidate, plan *scene.ScenePlan) (string, string) {
 	var sentenceIDs []string
-	summaries := make([]string, 0, len(plan.SourceNodeIDs))
-	for _, sourceID := range plan.SourceNodeIDs {
+	summaries := make([]string, 0, len(plan.SourceCandidateIDs()))
+	for _, sourceID := range plan.SourceCandidateIDs() {
 		candidate, ok := candidates[sourceID]
 		if !ok {
 			continue
@@ -949,138 +860,55 @@ func sourceContextForPlan(sourceIndex *segment.SourceIndex, candidates map[strin
 	return sourceIndex.TextForIDs(sentenceIDs), strings.Join(summaries, " ")
 }
 
-func finalGraphSnapshot(graphMgr *graph.Manager, st *tree.StoryTree) *graph.GraphSnapshot {
-	if st != nil {
-		for i := len(st.LeafNodeIDs) - 1; i >= 0; i-- {
-			if snap := graphMgr.SnapshotsAfter()[st.LeafNodeIDs[i]]; snap != nil {
-				return snap
-			}
-			if snap := graphMgr.SnapshotsBefore()[st.LeafNodeIDs[i]]; snap != nil {
-				return snap
-			}
+func collectCharactersFromGraph(snap *graph.GraphSnapshot) []schema.Character {
+	if snap == nil || len(snap.Characters) == 0 {
+		return nil
+	}
+	result := make([]schema.Character, 0, len(snap.Characters))
+	for _, state := range snap.Characters {
+		if state == nil || strings.TrimSpace(state.ID) == "" {
+			continue
 		}
+		name := strings.TrimSpace(state.Name)
+		if name == "" {
+			name = state.ID
+		}
+		result = append(result, schema.Character{
+			ID:          state.ID,
+			Name:        name,
+			Intro:       strings.TrimSpace(state.CurrentGoal),
+			Personality: append([]string(nil), state.Personality...),
+		})
 	}
-	for _, snap := range graphMgr.SnapshotsAfter() {
-		return snap
-	}
-	return nil
+	return result
 }
 
-// generateScenes generates YAML scenes from plans (Steps 9-10).
-func (p *Pipeline) generateScenes(ctx context.Context, plans []*scene.ScenePlan, st *tree.StoryTree, graphMgr *graph.Manager) ([]schema.Scene, error) {
-	// Build context builder
-	ctxBuilder := scene.NewContextBuilder(graphMgr.SnapshotsBefore(), graphMgr.SnapshotsAfter())
-
-	// Prepare context packages
-	type sceneJob struct {
-		plan *scene.ScenePlan
-		ctx  *scene.SceneContext
-	}
-
-	var jobs []sceneJob
-	for _, plan := range plans {
-		if plan.SceneCount == 0 {
-			continue // summary-only plans don't generate scenes
-		}
-
-		// Gather source text
-		var sourceText, sourceSummary string
-		for _, nodeID := range plan.SourceNodeIDs {
-			if n := st.GetNode(nodeID); n != nil {
-				sourceText += n.TextContent + "\n\n"
-				sourceSummary += n.Summary + " "
-			}
-		}
-
-		sceneCtx := ctxBuilder.Build(plan, sourceText, sourceSummary)
-		jobs = append(jobs, sceneJob{plan: plan, ctx: sceneCtx})
-	}
-
-	// Write scenes with goroutine pool
-	allScenes := make([]schema.Scene, len(jobs))
-	var wg sync.WaitGroup
-	sem := make(chan struct{}, p.config.MaxConcurrency)
-	var mu sync.Mutex
-	var firstErr error
-
-	for i, job := range jobs {
-		wg.Add(1)
-		go func(idx int, j sceneJob) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-
-			// Start span for this scene
-			sceneSpanName := fmt.Sprintf("pipeline.write_scene.%s", j.plan.ID)
-			_, sceneSpan := p.tracer.Start(ctx, sceneSpanName)
-			sceneSpan.SetAttributes(
-				attribute.String("scene.plan_id", j.plan.ID),
-				attribute.Int("scene.index", idx),
-			)
-
-			p.publishEvent(observability.PipelineEvent{
-				Type:    observability.EventSceneWriting,
-				Step:    "write_scene",
-				NodeID:  j.plan.ID,
-				Message: fmt.Sprintf("写场景 %d (计划 %s)...", idx+1, j.plan.ID),
-			})
-
-			sc, err := p.sceneWriter.WriteScene(ctx, j.ctx)
-			if err != nil {
-				sceneSpan.RecordError(err)
-				sceneSpan.End()
-				p.publishEvent(observability.PipelineEvent{
-					Type:   observability.EventSceneWritten,
-					Step:   "write_scene",
-					NodeID: j.plan.ID,
-					Error:  err.Error(),
-				})
-				mu.Lock()
-				if firstErr == nil {
-					firstErr = fmt.Errorf("scene %d: %w", idx+1, err)
-				}
-				mu.Unlock()
-				return
-			}
-			sceneSpan.End()
-			sc.Sequence = idx + 1
-			allScenes[idx] = *sc
-
-			p.publishEvent(observability.PipelineEvent{
-				Type:    observability.EventSceneWritten,
-				Step:    "write_scene",
-				NodeID:  j.plan.ID,
-				Message: fmt.Sprintf("场景 %d 完成", idx+1),
-			})
-		}(i, job)
-	}
-	wg.Wait()
-
-	if firstErr != nil {
-		return nil, firstErr
-	}
-
-	// Filter out any zero-value scenes (from failed writes)
-	result := make([]schema.Scene, 0, len(allScenes))
-	for _, sc := range allScenes {
-		if sc.ID != "" {
-			result = append(result, sc)
-		}
-	}
-	return result, nil
-}
-
-func generationArtifacts(sourceIndex *segment.SourceIndex, storyBeats []segment.StoryBeat, plans []*scene.ScenePlan, graphMgr *graph.Manager) *schema.GenerationArtifacts {
+func generationArtifacts(sourceIndex *segment.SourceIndex, storyBeats []segment.StoryBeat, plans []*scene.ScenePlan, finalGraph *graph.GraphSnapshot) *schema.GenerationArtifacts {
 	artifacts := &schema.GenerationArtifacts{
 		SourceIndex:   schemaSourceIndex(sourceIndex),
 		StoryBeats:    schemaStoryBeats(sourceIndex, storyBeats),
-		ScenePlan:     schemaScenePlan(plans),
-		GraphSnapshot: latestGraphSnapshot(graphMgr),
+		ScenePlan:     schemaScenePlan(plans, sourceIndex, storyBeats),
+		GraphSnapshot: finalGraph,
+		Warnings:      generationWarnings(storyBeats),
 	}
 	if artifacts.SourceIndex == nil && len(artifacts.StoryBeats) == 0 && artifacts.ScenePlan == nil && artifacts.GraphSnapshot == nil {
 		return nil
 	}
 	return artifacts
+}
+
+func generationWarnings(storyBeats []segment.StoryBeat) []schema.GenerationWarning {
+	warnings := make([]schema.GenerationWarning, 0)
+	for _, beat := range storyBeats {
+		if strings.Contains(beat.BoundaryReason, "回退") || strings.Contains(beat.BoundaryReason, "补齐") {
+			warnings = append(warnings, schema.GenerationWarning{
+				Code:    "story_beat_fallback",
+				Message: beat.BoundaryReason,
+				Source:  beat.ID,
+			})
+		}
+	}
+	return warnings
 }
 
 func schemaSourceIndex(idx *segment.SourceIndex) *schema.SourceIndex {
@@ -1109,21 +937,68 @@ func schemaStoryBeats(idx *segment.SourceIndex, beats []segment.StoryBeat) []sch
 	return out
 }
 
-func schemaScenePlan(plans []*scene.ScenePlan) *schema.ScenePlan {
+func schemaScenePlan(plans []*scene.ScenePlan, sourceIndex *segment.SourceIndex, storyBeats []segment.StoryBeat) *schema.ScenePlan {
 	if len(plans) == 0 {
 		return nil
 	}
+	beatIDsByCandidate := sourceBeatIDsByCandidate(storyBeats)
 	root := &schema.ScenePlan{ID: "scene_plan", Scenes: make([]schema.ScenePlan, 0, len(plans))}
 	for _, plan := range plans {
 		if plan == nil {
 			continue
 		}
-		root.Scenes = append(root.Scenes, schema.ScenePlan{ID: plan.ID, Sequence: plan.Sequence, Purpose: plan.Purpose, Location: plan.Location, TimeFrame: plan.TimeFrame, Characters: plan.Characters, KeyPlotPoints: plan.KeyPlotPoints})
+		root.Scenes = append(root.Scenes, schema.ScenePlan{
+			ID:            plan.ID,
+			Sequence:      plan.Sequence,
+			Purpose:       plan.Purpose,
+			SourceBeatIDs: sourceBeatIDsForPlan(plan, beatIDsByCandidate),
+			SourceRefs:    sourceRefsForPlan(plan, sourceIndex, storyBeats),
+			Location:      plan.Location,
+			TimeFrame:     plan.TimeFrame,
+			Characters:    plan.Characters,
+			KeyPlotPoints: plan.KeyPlotPoints,
+		})
 	}
 	if len(root.Scenes) == 0 {
 		return nil
 	}
 	return root
+}
+
+func sourceBeatIDsByCandidate(storyBeats []segment.StoryBeat) map[string][]string {
+	out := make(map[string][]string, len(storyBeats))
+	for i, beat := range storyBeats {
+		candidateID := fmt.Sprintf("candidate_%03d", i+1)
+		out[candidateID] = []string{beat.ID}
+	}
+	return out
+}
+
+func sourceBeatIDsForPlan(plan *scene.ScenePlan, beatIDsByCandidate map[string][]string) []string {
+	out := make([]string, 0, len(plan.SourceCandidateIDs()))
+	for _, candidateID := range plan.SourceCandidateIDs() {
+		out = append(out, beatIDsByCandidate[candidateID]...)
+	}
+	return out
+}
+
+func sourceRefsForPlan(plan *scene.ScenePlan, idx *segment.SourceIndex, storyBeats []segment.StoryBeat) []schema.SourceSentenceRef {
+	if idx == nil {
+		return nil
+	}
+	beatByCandidate := make(map[string]segment.StoryBeat, len(storyBeats))
+	for i, beat := range storyBeats {
+		beatByCandidate[fmt.Sprintf("candidate_%03d", i+1)] = beat
+	}
+	out := make([]schema.SourceSentenceRef, 0)
+	for _, candidateID := range plan.SourceCandidateIDs() {
+		beat, ok := beatByCandidate[candidateID]
+		if !ok {
+			continue
+		}
+		out = append(out, schemaSourceRefs(idx, beat.SourceSentenceIDs)...)
+	}
+	return out
 }
 
 func schemaSourceRefs(idx *segment.SourceIndex, ids []string) []schema.SourceSentenceRef {
@@ -1137,43 +1012,4 @@ func schemaSourceRefs(idx *segment.SourceIndex, ids []string) []schema.SourceSen
 		}
 	}
 	return out
-}
-
-func latestGraphSnapshot(graphMgr *graph.Manager) any {
-	if graphMgr == nil {
-		return nil
-	}
-	var latest *graph.GraphSnapshot
-	for _, snap := range graphMgr.SnapshotsAfter() {
-		if snap != nil {
-			latest = snap
-		}
-	}
-	return latest
-}
-
-// collectCharacters builds the character list from leaf node analysis.
-func (p *Pipeline) collectCharacters(leaves []*tree.StoryNode) []schema.Character {
-	charMap := make(map[string]*schema.Character)
-	for _, leaf := range leaves {
-		for _, rawName := range leaf.Characters {
-			name := strings.TrimSpace(rawName)
-			// Remove common quotation marks and brackets that AI sometimes includes
-			name = strings.Trim(name, "\"'「」『』\u201c\u201d")
-			if name == "" {
-				continue
-			}
-			if _, exists := charMap[name]; !exists {
-				charMap[name] = &schema.Character{
-					ID:   fmt.Sprintf("char_%03d", len(charMap)+1),
-					Name: name,
-				}
-			}
-		}
-	}
-	result := make([]schema.Character, 0, len(charMap))
-	for _, ch := range charMap {
-		result = append(result, *ch)
-	}
-	return result
 }

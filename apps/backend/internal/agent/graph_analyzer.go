@@ -155,16 +155,14 @@ func diffSnapshots(original, modified *graph.GraphSnapshot) *graph.GraphUpdateRe
 	}
 
 	// Find new/changed relations
-	originalRels := make(map[string]bool)
+	originalRels := make(map[string]graph.Relation, len(original.Relations))
 	for _, r := range original.Relations {
-		key := r.CharA + ":" + r.CharB
-		originalRels[key] = true
+		originalRels[relationKey(r.CharA, r.CharB)] = r
 	}
 
 	for _, r := range modified.Relations {
-		key := r.CharA + ":" + r.CharB
-		if !originalRels[key] {
-			// New relation
+		originalRel, ok := originalRels[relationKey(r.CharA, r.CharB)]
+		if !ok || originalRel.Type != r.Type || originalRel.Description != r.Description {
 			result.RelationChanges = append(result.RelationChanges, graph.RelationChange{
 				CharA:          r.CharA,
 				CharB:          r.CharB,
@@ -192,6 +190,13 @@ func diffSnapshots(original, modified *graph.GraphSnapshot) *graph.GraphUpdateRe
 	}
 
 	return result
+}
+
+func relationKey(a, b string) string {
+	if a > b {
+		return b + ":" + a
+	}
+	return a + ":" + b
 }
 
 // logChanges logs the graph changes for observability.
