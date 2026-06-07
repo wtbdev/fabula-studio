@@ -51,6 +51,7 @@ cd apps/backend
 export OPENAI_API_KEY="${OPENAI_API_KEY:-tp-c8htfkee8pzb1i5x9sdde7metqtl6q9sw6c2ls3gxzpiug4v}"
 export OPENAI_BASE_URL="${OPENAI_BASE_URL:-https://token-plan-cn.xiaomimimo.com/v1}"
 export LLM_MODEL="${LLM_MODEL:-mimo-v2.5}"
+export PIPELINE_MAX_CONCURRENCY="${PIPELINE_MAX_CONCURRENCY:-3000}"
 export OTLP_ENDPOINT="localhost:4317"
 
 go run ./cmd/server/ &

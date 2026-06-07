@@ -43,6 +43,7 @@ services:
       - LLM_MODEL=${LLM_MODEL:-deepseek-v4-flash}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      - PIPELINE_MAX_CONCURRENCY=${PIPELINE_MAX_CONCURRENCY:-3000}
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - OTLP_ENDPOINT=jaeger:4317
       - DATABASE_URL=${DATABASE_URL:-postgres://fabula:fabula@postgres:5432/fabula?sslmode=disable}

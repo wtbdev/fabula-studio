@@ -9,6 +9,7 @@ import {
   Download,
   FileCode2,
   FileSpreadsheet,
+  ExternalLink,
   FileText,
   FileType,
   GitBranch,
@@ -36,13 +37,6 @@ type WorkbenchMode = 'script' | 'settings'
 type ExtensionTab = 'info' | 'source' | 'suggestions' | 'artifacts'
 
 type EventDetails = Record<string, unknown>
-type RealtimeTreeUnit = {
-  id: string
-  title: string
-  summary: string
-  meta: string
-  characters: string[]
-}
 type RealtimePlan = {
   id: string
   title: string
@@ -92,7 +86,6 @@ const applyingRegeneratedScene = ref(false)
 const realtimeEvents = ref<PipelineEventDTO[]>([])
 const realtimeCharacters = ref<RealtimeCharacter[]>([])
 const realtimeRelations = ref<RealtimeRelation[]>([])
-const realtimeTreeUnits = ref<RealtimeTreeUnit[]>([])
 const realtimePlans = ref<RealtimePlan[]>([])
 const realtimeSceneHeadings = ref<RealtimeSceneHeading[]>([])
 const realtimeTraceId = ref<string | null>(null)
@@ -202,7 +195,6 @@ const stageLabelMap: Record<string, string> = {
   editor_reviewing: '主编审校中',
   final_validating: '最终校验中',
   extract_story_beats: '故事节拍提取中',
-  aggregate_units: '剧情单元聚合中',
   update_graph: '关系图谱更新中',
   graph_update: '关系图谱更新中',
   plan_scenes: '场景规划中',
@@ -226,6 +218,15 @@ const generationStepLabel = computed(() => {
 const generationProgress = computed(
   () => realtimeProgress.value ?? generateStatus.value?.progress ?? generateStatus.value?.job?.progress ?? 0,
 )
+
+const currentTraceId = computed(() => realtimeTraceId.value)
+
+const tracePageUrl = computed(() => {
+  const traceId = currentTraceId.value
+  if (!traceId) return '/jaeger/search?service=fabula-studio&operation=pipeline.convert'
+
+  return `/jaeger/trace/${encodeURIComponent(traceId)}`
+})
 
 const applyGenerationArtifacts = (artifacts?: GenerationArtifacts) => {
   if (artifacts) generationArtifacts.value = artifacts
@@ -282,7 +283,6 @@ const resetRealtimeGeneration = () => {
   realtimeEvents.value = []
   realtimeCharacters.value = []
   realtimeRelations.value = []
-  realtimeTreeUnits.value = []
   realtimePlans.value = []
   realtimeSceneHeadings.value = []
   realtimeTraceId.value = null
@@ -292,36 +292,6 @@ const resetRealtimeGeneration = () => {
   pendingGenerationJobId.value = null
 }
 
-const collectRealtimeTreeUnits = (details: EventDetails) => {
-  const tree = details.tree
-  if (!isRecord(tree) || !isRecord(tree.nodes)) return []
-  const nodes = tree.nodes
-
-  const leafIds = toStringArray(tree.leaf_node_ids)
-  const rootNodeId = typeof tree.root_node_id === 'string' ? tree.root_node_id : ''
-  const ids = leafIds.length ? leafIds : Object.keys(nodes).filter((id) => id !== rootNodeId)
-
-  return ids.flatMap((id): RealtimeTreeUnit[] => {
-    const node = nodes[id]
-    if (!isRecord(node)) return []
-
-    const start = getString(node, 'start_sentence_id') || '?'
-    const end = getString(node, 'end_sentence_id') || '?'
-    const location = getString(node, 'location') || '-'
-    const timeFrame = getString(node, 'time_frame') || '-'
-    const summary = getString(node, 'summary') || getString(node, 'main_conflict') || getString(node, 'text_content')
-
-    return [
-      {
-        id,
-        title: getString(node, 'unit_type') || getString(node, 'decision') || id,
-        summary: summary || '暂无摘要。',
-        meta: `${start} → ${end} · ${location} · ${timeFrame}`,
-        characters: toStringArray(node.characters).slice(0, 5),
-      },
-    ]
-  })
-}
 
 const collectRealtimePlans = (details: EventDetails) => {
   const plans = details.plans
@@ -398,14 +368,6 @@ const applyPipelineEvent = (event: PipelineEventDTO) => {
   realtimeCurrentStep.value = event.step ?? realtimeCurrentStep.value
 
   const details = event.details ?? {}
-  if (event.type === 'tree_snapshot') {
-    const units = collectRealtimeTreeUnits(details)
-    realtimeTreeUnits.value = units
-    upsertRealtimeCharacters(
-      units.flatMap((unit) => unit.characters),
-      '剧情单元',
-    )
-  }
   if (event.type === 'graph_updated' || event.step === 'graph_update') {
     upsertRealtimeCharacters(toStringArray(details.new_characters), '动态图谱')
     upsertRealtimeRelations(toStringArray(details.new_relations))
@@ -545,6 +507,7 @@ const pollGenerationStatus = async () => {
 
 const startGenerationPolling = () => {
   generating.value = true
+  extensionTab.value = 'artifacts'
   startGenerationEvents()
   void pollGenerationStatus()
   if (!generationPollingTimer) {
@@ -563,7 +526,6 @@ const scenePlanCount = computed(() => generationArtifacts.value?.scenePlan?.leng
 
 const realtimeCharacterCount = computed(() => realtimeCharacters.value.length)
 const realtimeRelationCount = computed(() => realtimeRelations.value.length)
-const realtimeTreeUnitCount = computed(() => realtimeTreeUnits.value.length)
 const realtimePlanCount = computed(() => realtimePlans.value.length)
 const realtimeSceneHeadingCount = computed(() => realtimeSceneHeadings.value.length)
 
@@ -572,7 +534,6 @@ const hasRealtimeGenerationArtifacts = computed(
     realtimeEvents.value.length > 0 ||
     realtimeCharacterCount.value > 0 ||
     realtimeRelationCount.value > 0 ||
-    realtimeTreeUnitCount.value > 0 ||
     realtimePlanCount.value > 0 ||
     realtimeSceneHeadingCount.value > 0 ||
     Boolean(realtimeTraceId.value || realtimeRunId.value),
@@ -921,6 +882,7 @@ const handleGenerateProject = async () => {
     errorMessage: null,
     updatedAt: new Date().toISOString(),
   }
+  extensionTab.value = 'artifacts'
   resetRealtimeGeneration()
   startGenerationEvents()
   generateStatus.value = {
@@ -973,6 +935,10 @@ const handleExit = async () => {
   }
 
   await router.push('/projects')
+}
+
+const handleOpenTrace = () => {
+  window.open(tracePageUrl.value, '_blank', 'noopener,noreferrer')
 }
 
 const handleExport = () => {
@@ -1155,6 +1121,12 @@ watch(
             </template>
             将基于当前剧本继续生成场次并同步人物关系，期间编辑器会暂时锁定，消耗 1 AI 点数。
           </n-popconfirm>
+          <n-button size="small" secondary type="primary" @click="handleOpenTrace">
+            <template #icon>
+              <n-icon><ExternalLink /></n-icon>
+            </template>
+            解析 Trace
+          </n-button>
           <n-button size="small" type="primary" :disabled="isWorkbenchLocked" @click="handleExport">
             <template #icon>
               <n-icon><Download /></n-icon>
@@ -1459,6 +1431,12 @@ watch(
                       <dd>{{ realtimeRunId }}</dd>
                     </div>
                   </dl>
+                  <n-button size="small" secondary type="primary" @click="handleOpenTrace">
+                    <template #icon>
+                      <n-icon><ExternalLink /></n-icon>
+                    </template>
+                    进入解析 Trace 页
+                  </n-button>
                 </section>
 
                 <section v-if="realtimeCharacters.length" class="artifact-section artifact-section-compact">
@@ -1514,18 +1492,6 @@ watch(
                   </ol>
                 </section>
 
-                <section v-if="realtimeTreeUnits.length" class="artifact-section subtle-section">
-                  <div class="artifact-section-heading">
-                    <h3>剧情单元</h3>
-                    <n-tag size="small" :bordered="false" type="success">{{ realtimeTreeUnitCount }} 个</n-tag>
-                  </div>
-                  <ol class="artifact-list compact-list">
-                    <li v-for="unit in realtimeTreeUnits.slice(0, 6)" :key="unit.id">
-                      <strong>{{ unit.title }}</strong>
-                      <p>{{ unit.summary }}</p>
-                    </li>
-                  </ol>
-                </section>
 
                 <section v-if="realtimeEvents.length" class="artifact-section subtle-section">
                   <div class="artifact-section-heading">
@@ -1805,7 +1771,7 @@ watch(
 
 .workbench-body {
   display: grid;
-  grid-template-columns: minmax(220px, 280px) minmax(560px, 1fr) minmax(260px, 320px);
+  grid-template-columns: minmax(220px, 280px) minmax(520px, 1fr) minmax(360px, 420px);
   gap: 12px;
   overflow: hidden;
   min-height: 0;
@@ -2293,7 +2259,7 @@ watch(
 
 @media (max-width: 1320px) and (min-width: 1181px) {
   .workbench-body {
-    grid-template-columns: minmax(200px, 250px) minmax(500px, 1fr) minmax(280px, 340px);
+    grid-template-columns: minmax(200px, 240px) minmax(460px, 1fr) minmax(360px, 400px);
   }
 }
 
