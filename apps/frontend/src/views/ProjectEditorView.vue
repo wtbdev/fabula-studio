@@ -92,7 +92,7 @@ const realtimeCurrentStep = ref<string | null>(null)
 const pendingGenerationJobId = ref<string | null>(null)
 let generationPollingTimer: number | null = null
 
-const GEN_LOG_KEY = 'fabula-gen-log'
+const genLogKey = () => (projectId.value ? `fabula-gen-log-${projectId.value}` : null)
 
 interface GenerationLogSnapshot {
   events: PipelineEventDTO[]
@@ -109,9 +109,10 @@ interface GenerationLogSnapshot {
 }
 
 const saveGenerationLog = () => {
+  const key = genLogKey()
+  if (!key) return
   try {
-    sessionStorage.setItem(
-      GEN_LOG_KEY,
+    sessionStorage.setItem(key,
       JSON.stringify({
         events: realtimeEvents.value,
         traceId: realtimeTraceId.value,
@@ -130,10 +131,11 @@ const saveGenerationLog = () => {
     /* ignore quota errors */
   }
 }
-
 const restoreGenerationLog = () => {
+  const key = genLogKey()
+  if (!key) return
   try {
-    const raw = sessionStorage.getItem(GEN_LOG_KEY)
+    const raw = sessionStorage.getItem(key)
     if (!raw) return
     const snapshot = JSON.parse(raw) as GenerationLogSnapshot
     realtimeEvents.value = snapshot.events ?? []
