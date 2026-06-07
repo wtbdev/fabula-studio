@@ -39,6 +39,35 @@ const deletingProjectId = ref('')
 const searchKeyword = ref('')
 let generationPollingTimer: number | null = null
 let pollingGenerationStatuses = false
+const expandedErrors = ref<Set<string>>(new Set())
+const ERROR_TRUNCATE_LENGTH = 200
+
+const toggleExpandError = (projectId: string) => {
+  const next = new Set(expandedErrors.value)
+  if (next.has(projectId)) next.delete(projectId)
+  else next.add(projectId)
+  expandedErrors.value = next
+}
+
+const copyErrorMessage = async (project: ProjectDTO) => {
+  if (!project.errorMessage) return
+  try {
+    await navigator.clipboard.writeText(project.errorMessage)
+    message.success('已复制错误日志')
+  } catch {
+    message.error('复制失败，请手动复制')
+  }
+}
+
+const isErrorTruncated = (project: ProjectDTO) => {
+  return Boolean(project.errorMessage && project.errorMessage.length > ERROR_TRUNCATE_LENGTH)
+}
+
+const displayError = (project: ProjectDTO) => {
+  if (!project.errorMessage) return ''
+  if (expandedErrors.value.has(project.id) || !isErrorTruncated(project)) return project.errorMessage
+  return project.errorMessage.slice(0, ERROR_TRUNCATE_LENGTH) + '…'
+}
 
 
 const editVisible = ref(false)
@@ -426,9 +455,27 @@ onUnmounted(() => {
                 </div>
               </div>
 
-              <p class="project-card-summary" :class="{ error: Boolean(project.errorMessage) }">
-                {{ projectDescription(project) }}
-              </p>
+              <div class="project-card-summary" :class="{ error: Boolean(project.errorMessage) }">
+                <template v-if="project.errorMessage">
+                  <span class="error-message-text">{{ displayError(project) }}</span>
+                  <span class="error-actions">
+                    <button
+                      v-if="isErrorTruncated(project)"
+                      class="error-toggle-btn"
+                      type="button"
+                      @click="toggleExpandError(project.id)"
+                    >
+                      {{ expandedErrors.has(project.id) ? '收起' : '展开全部' }}
+                    </button>
+                    <button class="error-copy-btn" type="button" @click="copyErrorMessage(project)">
+                      复制全部
+                    </button>
+                  </span>
+                </template>
+                <template v-else>
+                  {{ projectDescription(project) }}
+                </template>
+              </div>
 
               <div class="project-meta">
                 <span>
