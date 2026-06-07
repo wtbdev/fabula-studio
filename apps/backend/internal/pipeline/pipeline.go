@@ -763,7 +763,7 @@ func emptyGraphManager(candidates []scene.SceneCandidate) *graph.Manager {
 	return graphMgr
 }
 
-// generateScenesSequential writes scenes in plan order using source-grounded graph snapshots.
+// generateScenesSequential writes scenes in plan order with concurrent WriteScene calls.
 func (p *Pipeline) generateScenesSequential(ctx context.Context, plans []*scene.ScenePlan, sourceIndex *segment.SourceIndex, candidates []scene.SceneCandidate, graphMgr *graph.Manager) ([]schema.Scene, error) {
 	candidateByID := make(map[string]scene.SceneCandidate, len(candidates))
 	for _, candidate := range candidates {
@@ -771,55 +771,109 @@ func (p *Pipeline) generateScenesSequential(ctx context.Context, plans []*scene.
 	}
 
 	ctxBuilder := scene.NewContextBuilder(graphMgr.SnapshotsBefore(), graphMgr.SnapshotsAfter())
-	result := make([]schema.Scene, 0, len(plans))
 
+	// Pre-build source context per plan (cheap, no LLM)
+	type planJob struct {
+		plan          *scene.ScenePlan
+		sourceText    string
+		sourceSummary string
+	}
+	jobs := make([]planJob, 0, len(plans))
 	for _, plan := range plans {
 		if plan == nil || plan.SceneCount == 0 {
 			continue
 		}
-
 		sourceText, sourceSummary := sourceContextForPlan(sourceIndex, candidateByID, plan)
-		sceneCtx := ctxBuilder.Build(plan, sourceText, sourceSummary)
+		jobs = append(jobs, planJob{plan: plan, sourceText: sourceText, sourceSummary: sourceSummary})
+	}
 
-		sceneSpanName := fmt.Sprintf("pipeline.write_scene.%s", plan.ID)
-		_, sceneSpan := p.tracer.Start(ctx, sceneSpanName)
-		sceneSpan.SetAttributes(
-			attribute.String("scene.plan_id", plan.ID),
-			attribute.Int("scene.index", len(result)),
-		)
-
+	if len(jobs) == 0 {
+		return nil, nil
+	}
+	// Emit writing events before dispatching
+	for _, job := range jobs {
 		p.publishEvent(observability.PipelineEvent{
 			Type:    observability.EventSceneWriting,
 			Step:    "write_scene",
-			NodeID:  plan.ID,
-			Message: fmt.Sprintf("写场景 %d (计划 %s)...", len(result)+1, plan.ID),
+			NodeID:  job.plan.ID,
+			Message: fmt.Sprintf("写场景 (计划 %s)...", job.plan.ID),
 		})
+	}
 
-		sc, err := p.sceneWriter.WriteScene(ctx, sceneCtx)
-		if err != nil {
-			sceneSpan.RecordError(err)
-			sceneSpan.End()
-			p.publishEvent(observability.PipelineEvent{Type: observability.EventSceneWritten, Step: "write_scene", NodeID: plan.ID, Error: err.Error()})
-			return nil, fmt.Errorf("scene %d: %w", len(result)+1, err)
+	// Concurrently write scenes
+	type sceneResult struct {
+		index int
+		scene *schema.Scene
+		err   error
+	}
+	results := make([]sceneResult, len(jobs))
+
+	concurrency := p.config.MaxConcurrency
+	if concurrency < 1 {
+		concurrency = 1
+	}
+	if concurrency > len(jobs) {
+		concurrency = len(jobs)
+	}
+	jobIdx := make(chan int, len(jobs))
+	var wg sync.WaitGroup
+	for range concurrency {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range jobIdx {
+				job := jobs[i]
+				sceneCtx := ctxBuilder.Build(job.plan, job.sourceText, job.sourceSummary)
+
+				sceneSpanName := fmt.Sprintf("pipeline.write_scene.%s", job.plan.ID)
+				_, sceneSpan := p.tracer.Start(ctx, sceneSpanName)
+				sceneSpan.SetAttributes(
+					attribute.String("scene.plan_id", job.plan.ID),
+					attribute.Int("scene.job_index", i),
+				)
+
+				sc, err := p.sceneWriter.WriteScene(ctx, sceneCtx)
+				if err != nil {
+					sceneSpan.RecordError(err)
+					sceneSpan.End()
+					results[i] = sceneResult{index: i, err: err}
+					continue
+				}
+				sceneSpan.End()
+				results[i] = sceneResult{index: i, scene: sc}
+			}
+		}()
+	}
+	for i := range jobs {
+		jobIdx <- i
+	}
+	close(jobIdx)
+	wg.Wait()
+
+	// Collect in order, assign sequence numbers
+	out := make([]schema.Scene, 0, len(jobs))
+	for i, r := range results {
+		if r.err != nil {
+			return nil, fmt.Errorf("scene %d (plan %s): %w", i+1, jobs[i].plan.ID, r.err)
 		}
-		sc.Sequence = len(result) + 1
+		sc := r.scene
+		sc.Sequence = len(out) + 1
 		if sc.ID == "" {
 			sc.ID = fmt.Sprintf("scene_%03d", sc.Sequence)
 		}
-		sceneSpan.End()
 
-		result = append(result, *sc)
+		out = append(out, *sc)
 		p.publishEvent(observability.PipelineEvent{
 			Type:    observability.EventSceneWritten,
 			Step:    "write_scene",
-			NodeID:  plan.ID,
+			NodeID:  jobs[i].plan.ID,
 			Message: fmt.Sprintf("场景 %d 完成", sc.Sequence),
 			Details: map[string]interface{}{
-				"source_candidate_ids": plan.CandidateIDs(),
+				"source_candidate_ids": jobs[i].plan.CandidateIDs(),
 			},
 		})
 	}
-	return result, nil
+	return out, nil
 }
 
 func validatePlanGrounding(plans []*scene.ScenePlan, candidates []scene.SceneCandidate) error {

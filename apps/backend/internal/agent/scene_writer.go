@@ -14,10 +14,10 @@ import (
 	"github.com/fabula-studio/backend/internal/schema"
 	"github.com/fabula-studio/backend/internal/util"
 )
-
 // SceneWriterAgent generates a single YAML scene from a context package.
 type SceneWriterAgent struct {
-	agent *llmagent.LLMAgent
+	agent          *llmagent.LLMAgent
+	CustomWriteScene func(context.Context, *scene.SceneContext) (*schema.Scene, error)
 }
 
 const sceneWriterDesc = "根据场景上下文包，写出单个 YAML 格式的剧本场景"
@@ -83,8 +83,10 @@ func NewSceneWriterAgent(modelName, apiKey, baseURL string) *SceneWriterAgent {
 	return &SceneWriterAgent{agent: agt}
 }
 
-// WriteScene generates a single scene from a context package.
 func (a *SceneWriterAgent) WriteScene(ctx context.Context, sceneCtx *scene.SceneContext) (*schema.Scene, error) {
+	if a.CustomWriteScene != nil {
+		return a.CustomWriteScene(ctx, sceneCtx)
+	}
 	ctxJSON, err := json.Marshal(sceneCtx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal scene context: %w", err)
