@@ -17,7 +17,6 @@ import type {
   RegisterRequest,
   SceneDTO,
   SceneRegenerationMode,
-  UpdateProjectRequest,
   UpdateSceneRequest,
   UpdateSceneResponse,
   UserDTO,
@@ -987,32 +986,6 @@ Mock.mock(/\/api\/projects\/[^/?]+(?:\?.*)?$/, 'get', (options: MockRequestOptio
   return ok(project)
 })
 
-Mock.mock(/\/api\/projects\/[^/?]+$/, 'patch', (options: MockRequestOptions) => {
-  const auth = requireAuth()
-  if ('response' in auth) return auth.response
-
-  const projectId = getPathSegment(options, 2)
-  const project = getProjectForCurrentUser(projectId)
-
-  if (!project) {
-    return fail(40401, '项目不存在')
-  }
-
-  const payload = parseBody<UpdateProjectRequest>(options)
-  if (payload.title !== undefined) project.title = payload.title
-  if (payload.novelTitle !== undefined) project.novelTitle = payload.novelTitle
-  project.updatedAt = now()
-
-  return ok(
-    {
-      id: project.id,
-      title: project.title,
-      novelTitle: project.novelTitle,
-      updatedAt: project.updatedAt,
-    },
-    '项目更新成功',
-  )
-})
 
 Mock.mock(/\/api\/projects\/[^/?]+$/, 'delete', (options: MockRequestOptions) => {
   const auth = requireAuth()

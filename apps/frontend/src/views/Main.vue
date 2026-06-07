@@ -7,7 +7,6 @@ import {
   CheckCircle2,
   Clapperboard,
   Coins,
-  Edit3,
   FileText,
   FolderKanban,
   LoaderCircle,
@@ -21,7 +20,7 @@ import {
 import { generationApi, projectsApi } from '../api'
 import { useAuth } from '../composables/useAuth'
 import { getFormValidationMessage } from '../utils/formErrors'
-import type { FormInst, FormRules } from 'naive-ui'
+import type { FormRules } from 'naive-ui'
 import type { ProjectDTO, ProjectStatus } from '../api'
 
 const router = useRouter()
@@ -70,18 +69,6 @@ const displayError = (project: ProjectDTO) => {
 }
 
 
-const editVisible = ref(false)
-const editLoading = ref(false)
-const editFormRef = ref<FormInst | null>(null)
-const editingProject = ref<ProjectDTO | null>(null)
-const editModel = reactive({
-  title: '',
-  novelTitle: '',
-})
-
-const editRules: FormRules = {
-  title: [{ required: true, message: '请输入项目名称', trigger: ['blur', 'input'] }],
-}
 
 const statusMeta: Record<ProjectStatus, { label: string }> = {
   draft: { label: '草稿' },
@@ -217,34 +204,6 @@ const handlePageSizeChange = async (nextPageSize: number) => {
   pageSize.value = nextPageSize
   page.value = 1
   await fetchProjects()
-}
-
-const openEditModal = (project: ProjectDTO) => {
-  editingProject.value = project
-  editModel.title = project.title
-  editModel.novelTitle = project.novelTitle ?? ''
-  editVisible.value = true
-}
-
-const handleUpdateProject = async () => {
-  if (!editingProject.value) return
-
-  try {
-    await editFormRef.value?.validate()
-    editLoading.value = true
-    await projectsApi.update(editingProject.value.id, {
-      title: editModel.title.trim(),
-      novelTitle: editModel.novelTitle.trim() || undefined,
-    })
-    message.success('项目信息已更新')
-    editVisible.value = false
-    await fetchProjects()
-  } catch (error) {
-    const validationMessage = getFormValidationMessage(error)
-    message.error(validationMessage || getErrorMessage(error))
-  } finally {
-    editLoading.value = false
-  }
 }
 
 const handleDeleteProject = (project: ProjectDTO) => {
@@ -513,12 +472,6 @@ onUnmounted(() => {
               </n-button>
 
               <div class="project-card-tools">
-                <n-button size="tiny" secondary @click="openEditModal(project)">
-                  <template #icon>
-                    <n-icon><Edit3 /></n-icon>
-                  </template>
-                  信息
-                </n-button>
                 <n-button
                   v-if="project.status === 'completed'"
                   size="tiny"
@@ -581,34 +534,5 @@ onUnmounted(() => {
         />
       </div>
     </n-card>
-
-    <n-modal
-      v-model:show="editVisible"
-      preset="card"
-      title="修改项目信息"
-      class="project-edit-modal"
-      :bordered="false"
-    >
-      <n-form ref="editFormRef" :model="editModel" :rules="editRules" label-placement="top">
-        <n-form-item label="项目名称" path="title">
-          <n-input v-model:value="editModel.title" placeholder="输入剧本项目名称" />
-        </n-form-item>
-        <n-form-item label="小说名称" path="novelTitle">
-          <n-input v-model:value="editModel.novelTitle" placeholder="输入原小说名称" />
-        </n-form-item>
-      </n-form>
-
-      <template #footer>
-        <n-space justify="end">
-          <n-button @click="editVisible = false">取消</n-button>
-          <n-button type="primary" :loading="editLoading" @click="handleUpdateProject">
-            <template #icon>
-              <n-icon><Save /></n-icon>
-            </template>
-            保存
-          </n-button>
-        </n-space>
-      </template>
-    </n-modal>
   </section>
 </template>

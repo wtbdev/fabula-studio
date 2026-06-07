@@ -4,7 +4,6 @@ import type {
   CreateProjectRequest,
   ProjectDTO,
   ProjectListParams,
-  UpdateProjectRequest,
 } from './types'
 
 export const projectsApi = {
@@ -18,10 +17,6 @@ export const projectsApi = {
 
   detail(projectId: string) {
     return apiClient.get<ProjectDTO>(`/projects/${projectId}`)
-  },
-
-  update(projectId: string, payload: UpdateProjectRequest) {
-    return apiClient.patch<ProjectDTO, UpdateProjectRequest>(`/projects/${projectId}`, payload)
   },
 
   remove(projectId: string) {

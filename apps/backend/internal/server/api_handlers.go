@@ -142,8 +142,6 @@ func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
 			s.handleGetProject(w, r, userID, parts[2])
-		case http.MethodPatch:
-			s.handleUpdateProject(w, r, userID, parts[2])
 		case http.MethodDelete:
 			s.handleDeleteProject(w, r, userID, parts[2])
 		default:
@@ -228,19 +226,6 @@ func (s *Server) handleGetProject(w http.ResponseWriter, r *http.Request, userID
 	writeAPISuccess(w, "success", projectToDTO(p, true, nil))
 }
 
-func (s *Server) handleUpdateProject(w http.ResponseWriter, r *http.Request, userID, projectID string) {
-	var req updateProjectRequest
-	if err := decodeJSON(r, &req); err != nil || strings.TrimSpace(req.Title) == "" {
-		writeAPIError(w, http.StatusBadRequest, codeInvalid, "参数校验失败")
-		return
-	}
-	p, err := s.store.Projects.UpdateInfo(r.Context(), projectID, userID, req.Title, textValue(req.NovelTitle))
-	if err != nil {
-		writeAPIError(w, http.StatusNotFound, codeProjectMiss, "项目不存在")
-		return
-	}
-	writeAPISuccess(w, "项目更新成功", projectToDTO(p, false, nil))
-}
 
 func (s *Server) handleDeleteProject(w http.ResponseWriter, r *http.Request, userID, projectID string) {
 	ok, err := s.store.Projects.Delete(r.Context(), projectID, userID)

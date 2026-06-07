@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/fabula-studio/backend/internal/db/sqlc"
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type ProjectRepo struct {
@@ -46,10 +45,6 @@ func (r *ProjectRepo) List(ctx context.Context, userID, keyword string, page, pa
 
 func (r *ProjectRepo) ByIDForUser(ctx context.Context, projectID, userID string) (sqlc.Project, error) {
 	return r.q.GetProjectByIDForUser(ctx, sqlc.GetProjectByIDForUserParams{ID: projectID, UserID: userID})
-}
-
-func (r *ProjectRepo) UpdateInfo(ctx context.Context, projectID, userID, title string, novelTitle pgtype.Text) (sqlc.Project, error) {
-	return r.q.UpdateProjectInfo(ctx, sqlc.UpdateProjectInfoParams{ID: projectID, UserID: userID, Title: strings.TrimSpace(title), NovelTitle: novelTitle})
 }
 
 func (r *ProjectRepo) Delete(ctx context.Context, projectID, userID string) (bool, error) {

@@ -168,10 +168,6 @@ export interface CreateProjectRequest {
   adaptationProfile?: AdaptationProfile
 }
 
-export interface UpdateProjectRequest {
-  title?: string
-  novelTitle?: string
-}
 
 export type ProjectListParams = PageParams
 

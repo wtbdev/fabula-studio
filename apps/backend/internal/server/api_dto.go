@@ -110,11 +110,6 @@ type createProjectRequest struct {
 	AdaptationProfile *schema.AdaptationProfile `json:"adaptationProfile,omitempty"`
 }
 
-type updateProjectRequest struct {
-	Title      string `json:"title"`
-	NovelTitle string `json:"novelTitle"`
-}
-
 type updateSceneRequest struct {
 	Title    *string `json:"title"`
 	Location *string `json:"location"`

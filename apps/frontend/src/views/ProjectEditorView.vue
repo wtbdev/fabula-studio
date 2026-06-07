@@ -72,7 +72,6 @@ const saveStatus = ref<SaveStatus>('saved')
 const loading = ref(true)
 const sceneLoading = ref(false)
 const metaSaving = ref(false)
-const projectSaving = ref(false)
 const generating = ref(false)
 const activeMode = ref<WorkbenchMode>('script')
 const extensionTab = ref<ExtensionTab>('info')
@@ -166,10 +165,6 @@ const sceneMetaForm = reactive({
   summary: '',
 })
 
-const projectSettingsForm = reactive({
-  title: '',
-  novelTitle: '',
-})
 
 const activeScene = computed(() =>
   scenes.value.find((scene) => scene.id === activeSceneId.value) ?? null,
@@ -229,14 +224,6 @@ const hasSceneMetaChanged = computed(() => {
   )
 })
 
-const hasProjectSettingsChanged = computed(() => {
-  if (!project.value) return false
-
-  return (
-    projectSettingsForm.title.trim() !== project.value.title ||
-    projectSettingsForm.novelTitle.trim() !== (project.value.novelTitle ?? '')
-  )
-})
 
 const stageLabelMap: Record<string, string> = {
   queued: '生成排队中',
@@ -838,36 +825,6 @@ const handleSceneMetaSave = async () => {
   }
 }
 
-const handleProjectSettingsSave = async () => {
-  if (!project.value || projectSaving.value || isWorkbenchLocked.value) return
-
-  const title = projectSettingsForm.title.trim()
-  if (!title) {
-    message.warning('项目名称不能为空')
-    return
-  }
-
-  projectSaving.value = true
-
-  try {
-    const updatedProject = await projectsApi.update(project.value.id, {
-      title,
-      novelTitle: projectSettingsForm.novelTitle.trim(),
-    })
-
-    project.value = {
-      ...project.value,
-      ...updatedProject,
-      title,
-      novelTitle: projectSettingsForm.novelTitle.trim(),
-    }
-    message.success('项目设置已保存')
-  } catch {
-    message.error('项目设置保存失败，请重试')
-  } finally {
-    projectSaving.value = false
-  }
-}
 
 
 const handleExit = async () => {
@@ -967,14 +924,6 @@ watch(
   { immediate: true },
 )
 
-watch(
-  project,
-  (nextProject) => {
-    projectSettingsForm.title = nextProject?.title ?? ''
-    projectSettingsForm.novelTitle = nextProject?.novelTitle ?? ''
-  },
-  { immediate: true },
-)
 </script>
 
 <template>
@@ -1122,33 +1071,12 @@ watch(
               </div>
             </header>
 
-            <n-form label-placement="top" class="settings-form">
-              <n-form-item label="项目名称">
-                <n-input
-                  v-model:value="projectSettingsForm.title"
-                  placeholder="输入项目名称"
-                  :disabled="isWorkbenchLocked"
-                />
-              </n-form-item>
-              <n-form-item label="原小说名称">
-                <n-input
-                  v-model:value="projectSettingsForm.novelTitle"
-                  placeholder="输入原小说名称"
-                  :disabled="isWorkbenchLocked"
-                />
-              </n-form-item>
-              <n-button
-                type="primary"
-                :loading="projectSaving"
-                :disabled="isWorkbenchLocked || !hasProjectSettingsChanged"
-                @click="handleProjectSettingsSave"
-              >
-                <template #icon>
-                  <n-icon><Save /></n-icon>
-                </template>
-                保存项目设置
-              </n-button>
-            </n-form>
+            <dl class="settings-readonly">
+              <dt>项目名称</dt>
+              <dd>{{ project?.title ?? '' }}</dd>
+              <dt>原小说名称</dt>
+              <dd>{{ project?.novelTitle ?? '' }}</dd>
+            </dl>
 
             <section class="settings-section">
               <div class="settings-section-title">
