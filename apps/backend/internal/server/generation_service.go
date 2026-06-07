@@ -58,7 +58,10 @@ func (g *GenerationService) Status(ctx context.Context, userID, projectID string
 	}
 	dto := generationJobToDTO(job)
 	status := job.Status
-	if status == "queued" || status == "running" {
+	if p.Status == "completed" {
+		// Project completed but job may be stuck at running/commit_result
+		status = "completed"
+	} else if status == "queued" || status == "running" {
 		status = "generating"
 	}
 	return generationStatusDTO{ProjectID: projectID, JobID: job.ID, ProjectStatus: p.Status, Status: status, Progress: int(job.Progress), CurrentStep: job.CurrentStep, ErrorMessage: textPtr(job.ErrorMessage), Artifacts: dto.Artifacts, Job: &dto}, nil

@@ -500,6 +500,15 @@ const applyGenerateStatus = (status: GenerateStatusDTO) => {
     return
   }
 
+  if (status.status === 'completed') {
+    project.value = {
+      ...project.value,
+      status: 'completed',
+      updatedAt: status.job?.updatedAt ?? project.value.updatedAt,
+    }
+    return
+  }
+
   if (status.status === 'failed') {
     project.value = {
       ...project.value,
