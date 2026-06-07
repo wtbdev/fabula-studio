@@ -9,7 +9,7 @@ import (
 
 func TestScenePlanUnmarshalAcceptsSummaryOnlyBoolFalse(t *testing.T) {
 	var plan ScenePlan
-	data := []byte(`{"id":"plan_001","source_node_ids":["node_001"],"scene_count":1,"omit_details":["skip"],"summary_only":false}`)
+	data := []byte(`{"id":"plan_001","source_node_ids":["candidate_001"],"scene_count":1,"omit_details":["skip"],"summary_only":false}`)
 	if err := json.Unmarshal(data, &plan); err != nil {
 		t.Fatalf("unmarshal scene plan: %v", err)
 	}
@@ -20,7 +20,7 @@ func TestScenePlanUnmarshalAcceptsSummaryOnlyBoolFalse(t *testing.T) {
 
 func TestScenePlanUnmarshalAcceptsOmitDetailsString(t *testing.T) {
 	var plan ScenePlan
-	data := []byte(`{"id":"plan_001","source_node_ids":["node_001"],"scene_count":1,"omit_details":"skip this"}`)
+	data := []byte(`{"id":"plan_001","source_node_ids":["candidate_001"],"scene_count":1,"omit_details":"skip this"}`)
 	if err := json.Unmarshal(data, &plan); err != nil {
 		t.Fatalf("unmarshal scene plan: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestValidateAndRepairScenePlansAddsMissingCandidates(t *testing.T) {
 	if repaired[0].ID != "plan_001" || repaired[0].SceneCount != 1 || repaired[0].Purpose != "start" {
 		t.Fatalf("first plan not repaired from candidate: %#v", repaired[0])
 	}
-	if repaired[1].SourceNodeIDs[0] != "candidate_002" || repaired[1].Purpose != "escape" {
+	if repaired[1].SourceCandidateIDs()[0] != "candidate_002" || repaired[1].Purpose != "escape" {
 		t.Fatalf("missing candidate not converted to plan: %#v", repaired[1])
 	}
 }
