@@ -32,7 +32,7 @@ import SceneRegenerateModal from '../components/editor/SceneRegenerateModal.vue'
 
 type SaveStatus = 'saved' | 'dirty' | 'saving' | 'failed'
 type WorkbenchMode = 'script' | 'settings'
-type ExtensionTab = 'info' | 'source' | 'artifacts'
+type ExtensionTab = 'info' | 'source' | 'reader' | 'artifacts'
 
 type EventDetails = Record<string, unknown>
 type RealtimePlan = {
@@ -193,6 +193,36 @@ const sceneCharacters = computed(() => {
 
 const sourceChapters = computed(() => activeScene.value?.rawJson?.source?.chapters ?? [])
 const sourceSummary = computed(() => activeScene.value?.rawJson?.source?.summary ?? activeScene.value?.summary)
+const targetChapter = ref<string | null>(null)
+
+const CHAPTER_HEADING_RE = /^第[一二三四五六七八九十百千万0-9\s]+章\s*.*|^Chapter\s+\d+\s*.*$/im
+
+const parsedSourceChapters = computed(() => {
+  const text = project.value?.sourceText
+  if (!text) return []
+
+  const lines = text.split('\n')
+  const chapters: { title: string; contentLines: string[]; lineIndex: number }[] = []
+  let current: { title: string; contentLines: string[]; lineIndex: number } | null = null
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim()
+    if (CHAPTER_HEADING_RE.test(line)) {
+      current = { title: line, contentLines: [lines[i]], lineIndex: i }
+      chapters.push(current)
+    } else if (current) {
+      current.contentLines.push(lines[i])
+    }
+  }
+
+  return chapters
+})
+
+const handleReadChapter = (chapter: string) => {
+  targetChapter.value = chapter
+  extensionTab.value = 'reader'
+}
+const sourceTextLines = computed(() => project.value?.sourceText?.split('\n') ?? [])
 
 const projectStatusMeta = computed(() => {
   const map: Record<
@@ -1128,6 +1158,14 @@ watch(
             </button>
             <button
               type="button"
+              :class="{ active: extensionTab === 'reader' }"
+              @click="extensionTab = 'reader'"
+            >
+              <n-icon><BookOpenText /></n-icon>
+              原文阅读
+            </button>
+            <button
+              type="button"
               :class="{ active: extensionTab === 'artifacts' }"
               @click="extensionTab = 'artifacts'"
             >
@@ -1136,7 +1174,7 @@ watch(
             </button>
           </div>
 
-          <div v-if="activeScene || extensionTab === 'artifacts'" class="extension-content">
+          <div v-if="activeScene || extensionTab === 'artifacts' || extensionTab === 'reader'" class="extension-content">
             <section v-if="extensionTab === 'info' && activeScene" class="extension-card">
               <span class="extension-icon"><n-icon><BookOpenText /></n-icon></span>
               <h2>{{ activeScene.title }}</h2>
@@ -1212,12 +1250,43 @@ watch(
               <div class="source-chapters">
                 <span>章节索引</span>
                 <n-space v-if="sourceChapters.length" size="small">
-                  <n-tag v-for="chapter in sourceChapters" :key="chapter" size="small" type="info" :bordered="false">
+                  <n-tag v-for="chapter in sourceChapters" :key="chapter" size="small" type="info" :bordered="false" style="cursor:pointer" @click="handleReadChapter(chapter)">
                     {{ chapter }}
                   </n-tag>
                 </n-space>
                 <p v-else>尚未关联章节。</p>
               </div>
+            </section>
+
+            <section v-else-if="extensionTab === 'reader'" class="extension-card source-reader-card">
+              <div class="reader-header">
+                <span class="extension-icon"><n-icon><BookOpenText /></n-icon></span>
+                <h2>原文阅读</h2>
+                <span v-if="project?.novelTitle" class="reader-title">{{ project.novelTitle }}</span>
+              </div>
+
+              <n-scrollbar class="reader-scroll">
+                <template v-if="parsedSourceChapters.length">
+                  <section
+                    v-for="(ch, index) in parsedSourceChapters"
+                    :key="index"
+                    :ref="(el) => { if (ch.title.includes(targetChapter ?? '')) (el as HTMLElement)?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }"
+                    class="reader-chapter"
+                  >
+                    <h3 class="reader-chapter-heading">{{ ch.title }}</h3>
+                    <p
+                      v-for="(line, li) in ch.contentLines"
+                      :key="li"
+                      class="reader-line"
+                      :class="{ 'reader-line-empty': !line.trim() }"
+                    >{{ line }}</p>
+                  </section>
+                </template>
+                <div v-else-if="project?.sourceText" class="reader-raw">
+                  <p v-for="(line, li) in sourceTextLines" :key="li" class="reader-line">{{ line }}</p>
+                </div>
+                <n-empty v-else description="项目未上传原文文本。" />
+              </n-scrollbar>
             </section>
 
             <section v-else-if="extensionTab === 'artifacts'" class="extension-card artifact-card">
@@ -2241,6 +2310,69 @@ watch(
   .export-format-list {
     gap: 8px;
   }
+}
+
+.source-reader-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+
+.reader-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-line);
+  flex-shrink: 0;
+}
+
+.reader-header h2 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.reader-title {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--color-ink-light);
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reader-scroll {
+  flex: 1;
+  min-height: 0;
+  padding: 12px;
+}
+
+.reader-chapter {
+  margin-bottom: 20px;
+}
+
+.reader-chapter-heading {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 0 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--color-line);
+  color: var(--color-sage);
+}
+
+.reader-line {
+  margin: 0;
+  line-height: 1.8;
+  font-size: 14px;
+  color: var(--color-ink);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.reader-line-empty {
+  min-height: 1em;
 }
 </style>
 
