@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useDialog, useMessage } from 'naive-ui'
 import {
@@ -19,8 +19,6 @@ import {
 } from 'lucide-vue-next'
 import { generationApi, projectsApi } from '../api'
 import { useAuth } from '../composables/useAuth'
-import { getFormValidationMessage } from '../utils/formErrors'
-import type { FormRules } from 'naive-ui'
 import type { ProjectDTO, ProjectStatus } from '../api'
 
 const router = useRouter()
