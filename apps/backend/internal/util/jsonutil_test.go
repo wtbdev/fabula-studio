@@ -1,6 +1,7 @@
 package util
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -32,6 +33,38 @@ func TestPrepareJSONExtractsFencedPayload(t *testing.T) {
 	}
 	if got != `{"ok":true}` {
 		t.Fatalf("unexpected payload: %s", got)
+	}
+}
+
+func TestPrepareJSONRepairsMalformedLLMArrayField(t *testing.T) {
+	raw := `{
+		"scenes": [
+			{
+				"id": "scene-001",
+				"sequence": 1,
+				"keyPlotPoints": ["我被告知任务的异常性",
+				"expectedChanges": {
+					"characterChanges": ["我从普通人转为任务人"]
+				}
+			}
+		],
+		"warnings": []
+	}`
+
+	repaired, err := PrepareJSON(raw, "scene planner output")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !json.Valid([]byte(repaired)) {
+		t.Fatalf("repaired payload is not valid JSON: %s", repaired)
+	}
+
+	var payload map[string]interface{}
+	if err := json.Unmarshal([]byte(repaired), &payload); err != nil {
+		t.Fatalf("failed to unmarshal repaired payload: %v\n%s", err, repaired)
+	}
+	if _, ok := payload["scenes"].([]interface{}); !ok {
+		t.Fatalf("unexpected repaired payload: %+v", payload)
 	}
 }
 

@@ -107,16 +107,38 @@ func (a *ScenePlannerAgent) runPlanPrompt(ctx context.Context, prompt string) ([
 	}
 	raw = normalizeScenePlansJSON(raw)
 
+	plans, err := parseScenePlansJSON(raw)
+	if err != nil {
+		return nil, err
+	}
+	return plans, nil
+}
+
+func parseScenePlansJSON(raw string) ([]*scene.ScenePlan, error) {
 	var plans []*scene.ScenePlan
-	if err := json.Unmarshal([]byte(raw), &plans); err != nil {
-		var planMap map[string]*scene.ScenePlan
-		if err2 := json.Unmarshal([]byte(raw), &planMap); err2 != nil {
-			return nil, fmt.Errorf("failed to parse scene plans JSON: %w\nraw: %s", err, raw)
+	if err := json.Unmarshal([]byte(raw), &plans); err == nil {
+		return plans, nil
+	}
+
+	var wrapped struct {
+		Plans  []*scene.ScenePlan `json:"plans"`
+		Scenes []*scene.ScenePlan `json:"scenes"`
+	}
+	if err := json.Unmarshal([]byte(raw), &wrapped); err == nil {
+		plans = append(plans, wrapped.Plans...)
+		plans = append(plans, wrapped.Scenes...)
+		if len(plans) > 0 {
+			return plans, nil
 		}
-		plans = make([]*scene.ScenePlan, 0, len(planMap))
-		for _, p := range planMap {
-			plans = append(plans, p)
-		}
+	}
+
+	var planMap map[string]*scene.ScenePlan
+	if err := json.Unmarshal([]byte(raw), &planMap); err != nil {
+		return nil, fmt.Errorf("failed to parse scene plans JSON: %w\nraw: %s", err, raw)
+	}
+	plans = make([]*scene.ScenePlan, 0, len(planMap))
+	for _, p := range planMap {
+		plans = append(plans, p)
 	}
 	return plans, nil
 }
@@ -138,22 +160,60 @@ func normalizeScenePlansJSON(raw string) string {
 func normalizeValue(v interface{}) {
 	switch val := v.(type) {
 	case map[string]interface{}:
-		for k, v := range val {
-			if k == "omit_details" {
-				if s, ok := v.(string); ok {
-					if s == "" {
-						val[k] = []interface{}{}
-					} else {
-						val[k] = []interface{}{s}
-					}
-				}
-			} else {
-				normalizeValue(v)
-			}
+		normalizeScenePlanKeys(val)
+		for _, v := range val {
+			normalizeValue(v)
 		}
 	case []interface{}:
 		for _, item := range val {
 			normalizeValue(item)
 		}
+	}
+}
+
+func normalizeScenePlanKeys(val map[string]interface{}) {
+	renameJSONKey(val, "sourceNodeIds", "source_node_ids")
+	renameJSONKey(val, "sourceBeatIds", "source_node_ids")
+	renameJSONKey(val, "sceneCount", "scene_count")
+	renameJSONKey(val, "timeFrame", "time_frame")
+	renameJSONKey(val, "keyPlotPoints", "key_plot_points")
+	renameJSONKey(val, "omitDetails", "omit_details")
+	renameJSONKey(val, "summaryOnly", "summary_only")
+
+	for _, key := range []string{"source_node_ids", "characters", "key_plot_points", "omit_details"} {
+		if v, ok := val[key]; ok {
+			val[key] = normalizeStringList(v)
+		}
+	}
+}
+
+func renameJSONKey(val map[string]interface{}, from, to string) {
+	v, ok := val[from]
+	if !ok {
+		return
+	}
+	if _, exists := val[to]; !exists {
+		val[to] = v
+	}
+	delete(val, from)
+}
+
+func normalizeStringList(v interface{}) []interface{} {
+	switch val := v.(type) {
+	case string:
+		if val == "" {
+			return []interface{}{}
+		}
+		return []interface{}{val}
+	case []interface{}:
+		out := make([]interface{}, 0, len(val))
+		for _, item := range val {
+			if s, ok := item.(string); ok && s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return []interface{}{}
 	}
 }

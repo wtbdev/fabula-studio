@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	jsonrepair "github.com/RealAlexandreAI/json-repair"
 )
 
 // PrepareJSON strips markdown wrappers, extracts the JSON payload, repairs common
@@ -66,12 +68,22 @@ func RepairJSON(raw string) string {
 		return raw
 	}
 
-	// Try parsing as-is first
 	if json.Valid([]byte(raw)) {
 		return raw
 	}
 
-	// Find the last valid position by counting brackets
+	if repaired, err := jsonrepair.RepairJSON(raw); err == nil {
+		repaired = strings.TrimSpace(repaired)
+		if json.Valid([]byte(repaired)) {
+			return repaired
+		}
+	}
+
+	return repairTruncatedJSON(raw)
+}
+
+func repairTruncatedJSON(raw string) string {
+	// Find the last valid position by counting brackets.
 	openBraces := 0
 	openBrackets := 0
 	inString := false
@@ -105,23 +117,23 @@ func RepairJSON(raw string) string {
 		}
 	}
 
-	// Remove trailing incomplete string if any
+	// Remove trailing incomplete string if any.
 	if inString {
-		// Find last unescaped quote and truncate there
+		// Find last unescaped quote and truncate there.
 		lastQuote := strings.LastIndex(raw, `"`)
 
-		// Check if this quote is escaped
+		// Check if this quote is escaped.
 		slashCount := 0
 		for i := lastQuote - 1; i >= 0 && raw[i] == '\\'; i-- {
 			slashCount++
 		}
 		if slashCount%2 == 0 {
-			// Not escaped, truncate at the quote
+			// Not escaped, truncate at the quote.
 			raw = raw[:lastQuote]
 		}
 	}
 
-	// Remove trailing comma or colon if present
+	// Remove trailing comma or colon if present.
 	raw = strings.TrimRight(raw, " \t\n\r")
 	if len(raw) > 0 {
 		last := raw[len(raw)-1]
@@ -130,7 +142,7 @@ func RepairJSON(raw string) string {
 		}
 	}
 
-	// Close open brackets and braces
+	// Close open brackets and braces.
 	var suffix strings.Builder
 	for i := 0; i < openBrackets; i++ {
 		suffix.WriteString("]")
@@ -141,12 +153,12 @@ func RepairJSON(raw string) string {
 
 	repaired := raw + suffix.String()
 
-	// Verify the repair worked
+	// Verify the repair worked.
 	if json.Valid([]byte(repaired)) {
 		return repaired
 	}
 
-	// If still invalid, return original (will fail parsing as before)
+	// If still invalid, return original (will fail parsing as before).
 	return raw
 }
 
