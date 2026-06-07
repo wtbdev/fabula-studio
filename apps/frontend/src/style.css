@@ -1807,6 +1807,18 @@ select {
   font-weight: 800;
 }
 
+.project-loading-icon {
+  animation: projectLoadingSpin 900ms linear infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .project-loading-icon {
+    animation: none;
+  }
+}
+
 .project-card-tools {
   display: flex;
   align-items: center;
@@ -2477,6 +2489,12 @@ select {
     animation: fadeRise linear both;
     animation-range: entry 8% cover 30%;
     animation-timeline: view();
+  }
+}
+
+@keyframes projectLoadingSpin {
+  to {
+    transform: rotate(360deg);
   }
 }
 
