@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"gopkg.in/yaml.v3"
 	"trpc.group/trpc-go/trpc-agent-go/agent/llmagent"
 	"trpc.group/trpc-go/trpc-agent-go/model"
 	"trpc.group/trpc-go/trpc-agent-go/runner"
@@ -28,14 +27,14 @@ func New(a *agent.NovelAgent) *Converter {
 	return &Converter{agent: a}
 }
 
-// Convert processes the input chapters end-to-end and returns the YAML screenplay.
+// Convert processes the input chapters end-to-end and returns the screenplay.
 //
 // Pipeline:
 //
 //	 1. Analyze: Run analysis agent on each chapter to extract structure.
 //	 2. Assemble: Merge per-chapter analyses into a combined NovelAnalysis.
 //	 3. Write: Pass the combined analysis to the screenplay writer agent.
-//	 4. Parse: Parse the returned YAML into a Screenplay struct (validated).
+//	 4. Parse: Parse the returned JSON into a Screenplay struct (validated).
 func (c *Converter) Convert(ctx context.Context, title, author string, chapters []string) (*schema.Screenplay, string, error) {
 	if len(chapters) < 3 {
 		return nil, "", fmt.Errorf("至少需要3个章节，当前仅提供 %d 个", len(chapters))
@@ -54,19 +53,19 @@ func (c *Converter) Convert(ctx context.Context, title, author string, chapters 
 	// Step 2 — Merge into a single NovelAnalysis
 	merged := mergeAnalyses(title, author, allAnalyses)
 
-	// Step 3 — Generate screenplay
-	yamlStr, err := c.generateScreenplay(ctx, &merged)
+	// Step 3 — Generate screenplay (as JSON)
+	respStr, err := c.generateScreenplay(ctx, &merged)
 	if err != nil {
 		return nil, "", fmt.Errorf("生成剧本失败: %w", err)
 	}
 
 	// Step 4 — Parse & validate
 	scr := &schema.Screenplay{}
-	if err := yaml.Unmarshal([]byte(yamlStr), scr); err != nil {
-		return nil, yamlStr, fmt.Errorf("解析生成的 YAML 失败: %w\n\n原始 YAML 输出:\n%s", err, yamlStr)
+	if err := json.Unmarshal([]byte(respStr), scr); err != nil {
+		return nil, respStr, fmt.Errorf("解析生成的 JSON 失败: %w\n\n原始 JSON 输出:\n%s", err, respStr)
 	}
 
-	return scr, yamlStr, nil
+	return scr, respStr, nil
 }
 
 // analyzeChapter sends one chapter to the analysis agent and parses the result.
@@ -99,8 +98,7 @@ func (c *Converter) analyzeChapter(ctx context.Context, index int, text string) 
 // generateScreenplay sends the merged analysis to the writer agent.
 func (c *Converter) generateScreenplay(ctx context.Context, analysis *schema.NovelAnalysis) (string, error) {
 	analysisJSON, _ := json.MarshalIndent(analysis, "", "  ")
-
-	prompt := fmt.Sprintf(`基于以下小说分析结果，生成一个完整的剧本 YAML。
+	prompt := fmt.Sprintf(`基于以下小说分析结果，生成一个完整的剧本 JSON。
 
 分析结果：
 %s
@@ -109,14 +107,13 @@ func (c *Converter) generateScreenplay(ctx context.Context, analysis *schema.Nov
 1. 剧本必须包含至少 3 个以上场景（scene）
 2. 每个场景包含完整的场景标题、动作描述和对白
 3. 保持原作的叙事节奏和戏剧张力
-4. 输出严格遵循 YAML 格式`, string(analysisJSON))
+4. 输出严格遵循 JSON 格式`, string(analysisJSON))
 
-	yamlStr, err := c.runAgent(ctx, c.agent.Writer, prompt)
+	raw, err := c.runAgent(ctx, c.agent.Writer, prompt)
 	if err != nil {
 		return "", err
 	}
-
-	return util.PrepareYAML(yamlStr, "screenplay writer output")
+	return util.PrepareJSON(raw, "screenplay writer output")
 }
 
 // runAgent executes a single-turn agent run and returns the text response.
