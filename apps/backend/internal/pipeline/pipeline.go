@@ -329,30 +329,69 @@ func (p *Pipeline) Convert(ctx context.Context, title, author string, chapters [
 	p.status.Progress = 55
 	p.mu.Unlock()
 
-	// Step 8: Plan scenes
+	// Step 3: Plan scenes via location/time clustering + concurrent per-cluster planning
 	stepStart = time.Now()
 	ctx, planSpan := p.tracer.Start(ctx, "pipeline.plan_scenes")
 	setPipelineStepAttributes(planSpan, "plan_scenes", 55)
 	p.publishEvent(observability.PipelineEvent{
 		Type:    observability.EventScenePlanning,
 		Step:    "plan_scenes",
-		Message: fmt.Sprintf("步骤 3/6: 规划场景 (%d 故事节拍)...", len(state.SceneCandidates)),
+		Message: fmt.Sprintf("步骤 3/6: 规划场景 (%d 候选, 按地点/时间聚类)...", len(state.SceneCandidates)),
 	})
-	state.Plans, err = p.scenePlanner.PlanFromCandidates(ctx, state.SceneCandidates)
-	if err != nil {
-		planSpan.RecordError(err)
-		planSpan.End()
-		p.mu.Lock()
-		p.status.State = "failed"
-		p.status.Error = err.Error()
-		p.mu.Unlock()
-		p.publishEvent(observability.PipelineEvent{
-			Type:  observability.EventError,
-			Step:  "plan_scenes",
-			Error: err.Error(),
-		})
-		return nil, fmt.Errorf("scene planning failed: %w", err)
+
+	clusters := clusterSceneCandidates(state.SceneCandidates)
+
+	type clusterPlans struct {
+		index int
+		plans []*scene.ScenePlan
+		err   error
 	}
+	results := make([]clusterPlans, len(clusters))
+
+	concurrency := p.config.MaxConcurrency
+	if concurrency < 1 {
+		concurrency = 1
+	}
+	if concurrency > len(clusters) {
+		concurrency = len(clusters)
+	}
+	jobIdx := make(chan int, len(clusters))
+	var wg sync.WaitGroup
+	for range concurrency {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range jobIdx {
+				plans, err := p.scenePlanner.PlanFromCandidates(ctx, clusters[i])
+				results[i] = clusterPlans{index: i, plans: plans, err: err}
+			}
+		}()
+	}
+	for i := range clusters {
+		jobIdx <- i
+	}
+	close(jobIdx)
+	wg.Wait()
+
+	allPlans := make([]*scene.ScenePlan, 0, len(state.SceneCandidates))
+	for _, r := range results {
+		if r.err != nil {
+			planSpan.RecordError(r.err)
+			planSpan.End()
+			p.mu.Lock()
+			p.status.State = "failed"
+			p.status.Error = r.err.Error()
+			p.mu.Unlock()
+			p.publishEvent(observability.PipelineEvent{
+				Type:  observability.EventError,
+				Step:  "plan_scenes",
+				Error: r.err.Error(),
+			})
+			return nil, fmt.Errorf("scene planning failed for cluster %d: %w", r.index, r.err)
+		}
+		allPlans = append(allPlans, r.plans...)
+	}
+	state.Plans = scene.ValidateAndRepairScenePlans(allPlans, state.SceneCandidates)
 	if err := validatePlanGrounding(state.Plans, state.SceneCandidates); err != nil {
 		planSpan.RecordError(err)
 		planSpan.End()
@@ -874,6 +913,28 @@ func (p *Pipeline) generateScenesSequential(ctx context.Context, plans []*scene.
 		})
 	}
 	return out, nil
+}
+
+// clusterSceneCandidates groups consecutive candidates sharing the same Location and TimeFrame.
+// Each cluster is handled by one PlanFromCandidates call.
+func clusterSceneCandidates(candidates []scene.SceneCandidate) [][]scene.SceneCandidate {
+	if len(candidates) == 0 {
+		return nil
+	}
+	clusters := make([][]scene.SceneCandidate, 0, len(candidates))
+	current := []scene.SceneCandidate{candidates[0]}
+	for i := 1; i < len(candidates); i++ {
+		prev := &candidates[i-1]
+		cur := &candidates[i]
+		if cur.Location == prev.Location && cur.TimeFrame == prev.TimeFrame {
+			current = append(current, candidates[i])
+		} else {
+			clusters = append(clusters, current)
+			current = []scene.SceneCandidate{candidates[i]}
+		}
+	}
+	clusters = append(clusters, current)
+	return clusters
 }
 
 func validatePlanGrounding(plans []*scene.ScenePlan, candidates []scene.SceneCandidate) error {

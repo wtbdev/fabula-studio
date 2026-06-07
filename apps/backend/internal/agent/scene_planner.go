@@ -16,7 +16,8 @@ import (
 
 // ScenePlannerAgent decides how source-grounded scene candidates map to screenplay scenes.
 type ScenePlannerAgent struct {
-	agent *llmagent.LLMAgent
+	agent                   *llmagent.LLMAgent
+	CustomPlanFromCandidates func(context.Context, []scene.SceneCandidate) ([]*scene.ScenePlan, error)
 }
 
 const scenePlannerDesc = "规划故事候选节拍如何映射到剧本场景"
@@ -72,10 +73,11 @@ func NewScenePlannerAgent(modelName, apiKey, baseURL string) *ScenePlannerAgent 
 	return &ScenePlannerAgent{agent: agt}
 }
 
-// PlanFromCandidates generates scene plans from source-grounded story-beat candidates.
 func (a *ScenePlannerAgent) PlanFromCandidates(ctx context.Context, candidates []scene.SceneCandidate) ([]*scene.ScenePlan, error) {
+	if a.CustomPlanFromCandidates != nil {
+		return a.CustomPlanFromCandidates(ctx, candidates)
+	}
 	if len(candidates) == 0 {
-		return nil, nil
 	}
 	candidatesJSON, err := json.Marshal(candidates)
 	if err != nil {
