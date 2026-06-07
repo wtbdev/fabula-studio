@@ -1318,10 +1318,6 @@ watch(
                     <div v-if="realtimeTraceId"><dt>Trace ID</dt><dd>{{ realtimeTraceId }}</dd></div>
                     <div v-if="realtimeRunId"><dt>Run ID</dt><dd>{{ realtimeRunId }}</dd></div>
                   </dl>
-                  <n-button size="small" secondary type="primary" @click="handleOpenTrace">
-                    <template #icon><n-icon><ExternalLink /></n-icon></template>
-                    进入解析 Trace 页
-                  </n-button>
                 </section>
 
                 <!-- Completion status -->
