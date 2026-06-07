@@ -1,5 +1,5 @@
 import { createApp } from 'vue'
-import naive from 'naive-ui'
+import { registerNaiveComponents } from './plugins/naive'
 import { router } from './router'
 import './style.css'
 import App from './App.vue'
@@ -9,7 +9,9 @@ const bootstrap = async () => {
     await import('./mock')
   }
 
-  createApp(App).use(router).use(naive).mount('#app')
+  const app = createApp(App)
+  registerNaiveComponents(app)
+  app.use(router).mount('#app')
 }
 
 void bootstrap()

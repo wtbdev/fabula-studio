@@ -1,0 +1,68 @@
+import {
+  NAlert,
+  NButton,
+  NCard,
+  NCollapse,
+  NCollapseItem,
+  NConfigProvider,
+  NDialogProvider,
+  NEmpty,
+  NForm,
+  NFormItem,
+  NIcon,
+  NInput,
+  NLayout,
+  NLayoutContent,
+  NLayoutHeader,
+  NLayoutSider,
+  NMessageProvider,
+  NModal,
+  NPagination,
+  NPopconfirm,
+  NProgress,
+  NRadioButton,
+  NRadioGroup,
+  NScrollbar,
+  NSelect,
+  NSpace,
+  NSpin,
+  NTag,
+} from 'naive-ui'
+import type { App } from 'vue'
+
+const naiveComponents = [
+  NAlert,
+  NButton,
+  NCard,
+  NCollapse,
+  NCollapseItem,
+  NConfigProvider,
+  NDialogProvider,
+  NEmpty,
+  NForm,
+  NFormItem,
+  NIcon,
+  NInput,
+  NLayout,
+  NLayoutContent,
+  NLayoutHeader,
+  NLayoutSider,
+  NMessageProvider,
+  NModal,
+  NPagination,
+  NPopconfirm,
+  NProgress,
+  NRadioButton,
+  NRadioGroup,
+  NScrollbar,
+  NSelect,
+  NSpace,
+  NSpin,
+  NTag,
+]
+
+export function registerNaiveComponents(app: App) {
+  for (const component of naiveComponents) {
+    app.component(component.name!, component)
+  }
+}
