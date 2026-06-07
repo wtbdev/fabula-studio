@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useDialog, useMessage } from 'naive-ui'
 import {
@@ -37,6 +37,9 @@ const loading = ref(false)
 const generatingProjectId = ref('')
 const deletingProjectId = ref('')
 const searchKeyword = ref('')
+let generationPollingTimer: number | null = null
+let pollingGenerationStatuses = false
+
 
 const editVisible = ref(false)
 const editLoading = ref(false)
@@ -102,6 +105,49 @@ const formatDate = (value?: string) => {
 const getErrorMessage = (error: unknown) => {
   return error instanceof Error ? error.message : '操作失败，请稍后重试'
 }
+const isGenerationActive = (status?: string) => status === 'generating' || status === 'queued' || status === 'running'
+
+const stopGenerationPolling = () => {
+  if (!generationPollingTimer) return
+  window.clearInterval(generationPollingTimer)
+  generationPollingTimer = null
+}
+
+const pollGenerationStatuses = async () => {
+  if (pollingGenerationStatuses) return
+  const generatingProjects = projects.value.filter((project) => isGenerationActive(project.status))
+  if (generatingProjects.length === 0) {
+    stopGenerationPolling()
+    return
+  }
+
+  pollingGenerationStatuses = true
+  try {
+    const statuses = await Promise.all(
+      generatingProjects.map((project) => generationApi.status(project.id).catch(() => null)),
+    )
+    const settled = statuses.some((status) => status?.status === 'completed' || status?.status === 'failed')
+    if (settled) {
+      await Promise.all([fetchProjects(), fetchMe()])
+    }
+  } finally {
+    pollingGenerationStatuses = false
+  }
+}
+
+const syncGenerationPolling = () => {
+  if (!projects.value.some((project) => isGenerationActive(project.status))) {
+    stopGenerationPolling()
+    return
+  }
+
+  if (!generationPollingTimer) {
+    generationPollingTimer = window.setInterval(() => {
+      void pollGenerationStatuses()
+    }, 2500)
+  }
+}
+
 
 const fetchProjects = async () => {
   loading.value = true
@@ -114,6 +160,7 @@ const fetchProjects = async () => {
     })
     projects.value = result.list
     total.value = result.total
+    syncGenerationPolling()
   } catch (error) {
     message.error(getErrorMessage(error))
   } finally {
@@ -209,10 +256,13 @@ const handleGenerateProject = async (project: ProjectDTO) => {
       config: project.config,
       adaptationProfile: project.adaptationProfile,
     })
-    message.success('剧本生成成功，已扣除 300 点')
-    await fetchMe()
+    project.status = 'generating'
+    project.errorMessage = null
+    project.updatedAt = new Date().toISOString()
+    message.success('生成任务已启动')
+    void fetchMe()
     await fetchProjects()
-    await router.push(`/projects/${project.id}/edit`)
+    syncGenerationPolling()
   } catch (error) {
     message.error(getErrorMessage(error))
     await fetchProjects()
@@ -234,6 +284,10 @@ const handlePrimaryProjectAction = async (project: ProjectDTO) => {
 
 onMounted(() => {
   void fetchProjects()
+})
+
+onUnmounted(() => {
+  stopGenerationPolling()
 })
 </script>
 
@@ -260,7 +314,7 @@ onMounted(() => {
       </article>
       <article class="metric-card" data-accent="generating">
         <div class="metric-icon">
-          <LoaderCircle />
+          <LoaderCircle :class="{ 'project-loading-icon': projectSummary.generating > 0 }" />
         </div>
         <div class="metric-body">
           <span class="metric-label">生成中</span>
@@ -407,7 +461,7 @@ onMounted(() => {
                 <template #icon>
                   <n-icon>
                     <Clapperboard v-if="project.status === 'completed'" />
-                    <LoaderCircle v-else-if="project.status === 'generating'" />
+                    <LoaderCircle v-else-if="project.status === 'generating'" class="project-loading-icon" />
                     <WandSparkles v-else />
                   </n-icon>
                 </template>

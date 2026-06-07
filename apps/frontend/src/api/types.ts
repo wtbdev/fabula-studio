@@ -1,6 +1,8 @@
 import type { PageParams } from './request'
 
 export type ProjectStatus = 'draft' | 'generating' | 'completed' | 'failed'
+export type GenerationJobStatus = 'queued' | 'running' | 'completed' | 'failed'
+export type GenerateStatus = ProjectStatus | GenerationJobStatus
 export type SceneSuggestionType =
   | 'dialogue'
   | 'conflict'
@@ -114,6 +116,19 @@ export interface GenerationArtifacts {
   warnings?: string[]
   graphSnapshot?: GraphSnapshotSummary
 }
+export interface GenerationJobDTO {
+  id: string
+  projectId: string
+  status: GenerationJobStatus
+  progress?: number
+  currentStep?: string
+  errorMessage?: string | null
+  artifacts?: GenerationArtifacts
+  startedAt?: string | null
+  completedAt?: string | null
+  createdAt?: string
+  updatedAt?: string
+}
 
 export interface GenerateProjectRequest {
   config?: AdaptConfig
@@ -183,19 +198,25 @@ export interface SceneDTO {
 
 export interface GenerateProjectResponse {
   projectId: string
-  status: ProjectStatus
-  costPoints: number
-  remainingPoints: number
-  scenes: SceneDTO[]
+  jobId?: string
+  job?: GenerationJobDTO
+  status: GenerateStatus
+  costPoints?: number
+  remainingPoints?: number
+  scenes?: SceneDTO[]
   artifacts?: GenerationArtifacts
 }
 
 export interface GenerateStatusDTO {
   projectId: string
-  status: ProjectStatus
-  progress: number
-  currentStep: string
+  jobId?: string
+  job?: GenerationJobDTO
+  status: GenerateStatus
+  progress?: number
+  currentStep?: string
+  errorMessage?: string | null
   artifacts?: GenerationArtifacts
+  scenes?: SceneDTO[]
 }
 
 export interface UpdateSceneRequest {

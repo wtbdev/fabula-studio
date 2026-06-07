@@ -181,8 +181,8 @@ const handleCreateAndGenerate = async () => {
       config: project.config,
       adaptationProfile: project.adaptationProfile ?? buildAdaptationProfile(),
     })
-    await fetchMe()
-    message.success('剧本生成成功，已扣除 300 点')
+    void fetchMe()
+    message.success('生成任务已启动，可在编辑器中查看进度')
     await router.push(`/projects/${project.id}/edit`)
   } catch (error) {
     const validationMessage = getFormValidationMessage(error)

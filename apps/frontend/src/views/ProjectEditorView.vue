@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useMessage } from 'naive-ui'
 import {
@@ -38,7 +38,7 @@ type ExtensionTab = 'info' | 'source' | 'suggestions' | 'artifacts'
 const route = useRoute()
 const router = useRouter()
 const message = useMessage()
-const { authState } = useAuth()
+const { authState, fetchMe } = useAuth()
 
 const projectId = computed(() => route.params.id as string)
 
@@ -61,6 +61,9 @@ const exportFormat = ref<ExportFormat>('txt')
 const exportLoading = ref(false)
 const sceneRegenerateVisible = ref(false)
 const applyingRegeneratedScene = ref(false)
+let generationPollingTimer: number | null = null
+let pollingGenerationStatus = false
+
 
 const workbenchModes: Array<{ key: WorkbenchMode; label: string }> = [
   { key: 'script', label: '剧本编辑器' },
@@ -157,14 +160,118 @@ const stageLabelMap: Record<string, string> = {
 }
 
 const generationStepLabel = computed(() => {
-  const currentStep = generateStatus.value?.currentStep
+  const currentStep = generateStatus.value?.currentStep ?? generateStatus.value?.job?.currentStep
   if (!currentStep) return '暂无生成状态'
 
   return stageLabelMap[currentStep] ?? currentStep
 })
 
+const generationProgress = computed(
+  () => generateStatus.value?.progress ?? generateStatus.value?.job?.progress ?? 0,
+)
+
 const applyGenerationArtifacts = (artifacts?: GenerationArtifacts) => {
   if (artifacts) generationArtifacts.value = artifacts
+}
+
+const isGenerationActive = (status?: string) =>
+  status === 'generating' || status === 'queued' || status === 'running'
+
+const stopGenerationPolling = () => {
+  if (!generationPollingTimer) return
+  window.clearInterval(generationPollingTimer)
+  generationPollingTimer = null
+}
+
+const applyGenerateStatus = (status: GenerateStatusDTO) => {
+  generateStatus.value = status
+  applyGenerationArtifacts(status.artifacts ?? status.job?.artifacts)
+
+  if (!project.value) return
+
+  if (isGenerationActive(status.status)) {
+    project.value = {
+      ...project.value,
+      status: 'generating',
+      errorMessage: null,
+      updatedAt: status.job?.updatedAt ?? project.value.updatedAt,
+    }
+    return
+  }
+
+  if (status.status === 'failed') {
+    project.value = {
+      ...project.value,
+      status: 'failed',
+      errorMessage: status.errorMessage ?? status.job?.errorMessage ?? project.value.errorMessage,
+      updatedAt: status.job?.updatedAt ?? project.value.updatedAt,
+    }
+  }
+}
+
+const refreshCompletedGeneration = async () => {
+  const previousSceneId = activeSceneId.value
+  const [nextProject, nextScenes] = await Promise.all([
+    projectsApi.detail(projectId.value),
+    scenesApi.list(projectId.value),
+  ])
+  project.value = nextProject
+  applyGenerationArtifacts(nextProject.artifacts)
+  scenes.value = [...nextScenes].sort((previous, next) => previous.sceneNo - next.sceneNo)
+
+  const nextSceneId =
+    (previousSceneId && scenes.value.some((scene) => scene.id === previousSceneId)
+      ? previousSceneId
+      : scenes.value[0]?.id) ?? null
+
+  activeSceneId.value = null
+  editorContent.value = ''
+  if (nextSceneId) {
+    await selectScene(nextSceneId)
+  }
+  saveStatus.value = 'saved'
+}
+
+const pollGenerationStatus = async () => {
+  if (pollingGenerationStatus) return
+  pollingGenerationStatus = true
+
+  try {
+    const status = await generationApi.status(projectId.value)
+    applyGenerateStatus(status)
+
+    if (status.status === 'completed') {
+      stopGenerationPolling()
+      await refreshCompletedGeneration()
+      void fetchMe()
+      generating.value = false
+      message.success('剧本生成完成')
+      return
+    }
+
+    if (status.status === 'failed') {
+      stopGenerationPolling()
+      generating.value = false
+      message.error(status.errorMessage ?? status.job?.errorMessage ?? '剧本生成失败，请稍后重试')
+      return
+    }
+
+    generating.value = isGenerationActive(status.status)
+  } catch {
+    // Keep polling: transient network errors should not unlock the editor while backend is generating.
+  } finally {
+    pollingGenerationStatus = false
+  }
+}
+
+const startGenerationPolling = () => {
+  generating.value = true
+  void pollGenerationStatus()
+  if (!generationPollingTimer) {
+    generationPollingTimer = window.setInterval(() => {
+      void pollGenerationStatus()
+    }, 2500)
+  }
 }
 
 const sourceIndexChapterCount = computed(
@@ -227,8 +334,11 @@ const loadProject = async () => {
   try {
     project.value = await projectsApi.detail(projectId.value)
     applyGenerationArtifacts(project.value.artifacts)
-    generateStatus.value = await generationApi.status(projectId.value)
-    applyGenerationArtifacts(generateStatus.value.artifacts)
+    const status = await generationApi.status(projectId.value)
+    applyGenerateStatus(status)
+    if (isGenerationActive(status.status) || project.value.status === 'generating') {
+      startGenerationPolling()
+    }
   } catch {
     message.error('项目加载失败')
   }
@@ -488,18 +598,18 @@ const handleGenerateProject = async () => {
 
   const previousStatus = project.value.status
   const previousGenerateStatus = generateStatus.value
-  const previousSceneId = activeSceneId.value
   generating.value = true
   project.value = {
     ...project.value,
     status: 'generating',
+    errorMessage: null,
     updatedAt: new Date().toISOString(),
   }
   generateStatus.value = {
     projectId: project.value.id,
-    status: 'generating',
-    progress: 64,
-    currentStep: 'scene_writing',
+    status: 'queued',
+    progress: 0,
+    currentStep: 'source_indexing',
   }
 
   try {
@@ -507,34 +617,18 @@ const handleGenerateProject = async () => {
       config: project.value.config,
       adaptationProfile: project.value.adaptationProfile,
     })
-    const generatedScenes = [...result.scenes].sort(
-      (previous, next) => previous.sceneNo - next.sceneNo,
-    )
-    scenes.value = generatedScenes
-    applyGenerationArtifacts(result.artifacts)
-    project.value = {
-      ...project.value,
+    generateStatus.value = {
+      projectId: project.value.id,
+      jobId: result.jobId,
+      job: result.job,
       status: result.status,
-      sceneCount: generatedScenes.length,
-      updatedAt: new Date().toISOString(),
+      progress: result.job?.progress ?? (result.status === 'completed' ? 100 : 0),
+      currentStep: result.job?.currentStep ?? 'source_indexing',
+      artifacts: result.artifacts,
     }
-    generateStatus.value = await generationApi.status(project.value.id)
-    applyGenerationArtifacts(generateStatus.value.artifacts)
-    if (authState.user) {
-      authState.user.aiPoints = result.remainingPoints
-    }
-    const nextSceneId =
-      (previousSceneId && generatedScenes.some((scene) => scene.id === previousSceneId)
-        ? previousSceneId
-        : generatedScenes[0]?.id) ?? null
-
-    activeSceneId.value = null
-    editorContent.value = ''
-    if (nextSceneId) {
-      await selectScene(nextSceneId)
-    }
-    saveStatus.value = 'saved'
-    message.success(`增量生成完成，消耗 ${result.costPoints} AI 点数`)
+    applyGenerationArtifacts(result.artifacts ?? result.job?.artifacts)
+    message.success('生成任务已启动')
+    startGenerationPolling()
   } catch (error) {
     if (project.value) {
       project.value = {
@@ -544,9 +638,8 @@ const handleGenerateProject = async () => {
       }
     }
     generateStatus.value = previousGenerateStatus
-    message.error(error instanceof Error ? error.message : '剧本生成失败，请稍后重试')
-  } finally {
     generating.value = false
+    message.error(error instanceof Error ? error.message : '剧本生成失败，请稍后重试')
   }
 }
 
@@ -619,6 +712,10 @@ onMounted(async () => {
   loading.value = true
   await Promise.all([loadProject(), loadScenes()])
   loading.value = false
+})
+
+onUnmounted(() => {
+  stopGenerationPolling()
 })
 
 watch(
@@ -829,7 +926,7 @@ watch(
               <n-progress
                 v-if="generateStatus"
                 type="line"
-                :percentage="generateStatus.progress"
+                :percentage="generationProgress"
                 :indicator-placement="'inside'"
               />
               <p>{{ generationStepLabel }}</p>

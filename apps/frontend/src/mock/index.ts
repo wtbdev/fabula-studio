@@ -12,6 +12,7 @@ import type {
   GenerateSceneSuggestionsRequest,
   GenerateSceneSuggestionsResponse,
   GenerateProjectResponse,
+  GenerationJobDTO,
   GenerateStatusDTO,
   LoginRequest,
   ProjectDTO,
@@ -420,6 +421,28 @@ let scenes: SceneDTO[] = [
   ...createPaginationScenes('project_012', 11, '长桥尽头', '2026-06-05T10:35:00.000Z'),
 ]
 
+const generationJobs = new Map<string, GenerationJobDTO>()
+
+const generationTimers = new Map<string, number[]>()
+
+const generationStepSequence = ['source_indexing', 'beat_extracting', 'scene_planning', 'scene_writing', 'final_validating']
+
+const clearGenerationTimers = (projectId: string) => {
+  const timers = generationTimers.get(projectId)
+  if (!timers) return
+  timers.forEach((timer) => window.clearTimeout(timer))
+  generationTimers.delete(projectId)
+}
+
+const setGenerationJob = (job: GenerationJobDTO) => {
+  generationJobs.set(job.projectId, job)
+}
+
+const getActiveGenerationJob = (projectId: string) => {
+  const job = generationJobs.get(projectId)
+  return job && (job.status === 'queued' || job.status === 'running') ? job : null
+}
+
 let sceneSuggestions: SceneSuggestion[] = []
 
 const readSessionUser = () => {
@@ -710,6 +733,7 @@ const createMockGenerationArtifacts = (project: ProjectDTO, generatedScenes: Sce
     id: `beat_${String(index + 1).padStart(3, '0')}`,
     order: index + 1,
     title: scene.title,
+
     summary: scene.summary || `${scene.title} 推进主要调查线。`,
     sourceChapterIds: [`chapter_${String(Math.min(index + 1, 3)).padStart(3, '0')}`],
     characters: scene.rawJson?.characters,
@@ -733,6 +757,85 @@ const createMockGenerationArtifacts = (project: ProjectDTO, generatedScenes: Sce
     updatedAt: now(),
   },
 })
+
+const completeMockGenerationJob = (projectId: string, user: MockUser) => {
+  const project = projects.find((item) => item.id === projectId)
+  const job = generationJobs.get(projectId)
+  if (!project || !job || job.status === 'completed' || job.status === 'failed') return
+
+  const existingScenes = scenes
+    .filter((scene) => scene.projectId === projectId)
+    .sort((previous, next) => previous.sceneNo - next.sceneNo)
+  const generatedScenes =
+    existingScenes.length > 0
+      ? createIncrementalMockScenes(projectId, existingScenes)
+      : createMockScenes(projectId)
+  const artifacts = createMockGenerationArtifacts(project, generatedScenes)
+  const completedAt = now()
+
+  scenes = scenes.filter((scene) => scene.projectId !== projectId)
+  scenes.push(...generatedScenes)
+  project.status = 'completed'
+  project.errorMessage = null
+  project.sceneCount = generatedScenes.length
+  project.artifacts = artifacts
+  project.updatedAt = completedAt
+
+  job.status = 'completed'
+  job.progress = 100
+  job.currentStep = 'final_validating'
+  job.artifacts = artifacts
+  job.completedAt = completedAt
+  job.updatedAt = completedAt
+  setGenerationJob(job)
+  clearGenerationTimers(projectId)
+
+  user.updatedAt = completedAt
+}
+
+const startMockGenerationJob = (project: ProjectDTO, user: MockUser) => {
+  const activeJob = getActiveGenerationJob(project.id)
+  if (activeJob) return activeJob
+
+  const createdAt = now()
+  const job: GenerationJobDTO = {
+    id: createId('job'),
+    projectId: project.id,
+    status: 'queued',
+    progress: 0,
+    currentStep: generationStepSequence[0],
+    errorMessage: null,
+    createdAt,
+    updatedAt: createdAt,
+  }
+
+  user.aiPoints -= 300
+  user.updatedAt = createdAt
+  project.status = 'generating'
+  project.errorMessage = null
+  project.updatedAt = createdAt
+  setGenerationJob(job)
+  clearGenerationTimers(project.id)
+
+  const timers = generationStepSequence.map((step, index) =>
+    window.setTimeout(() => {
+      const currentJob = generationJobs.get(project.id)
+      if (!currentJob || currentJob.id !== job.id || currentJob.status === 'completed') return
+      const updatedAt = now()
+      currentJob.status = 'running'
+      currentJob.progress = Math.min(90, 15 + index * 18)
+      currentJob.currentStep = step
+      currentJob.startedAt = currentJob.startedAt ?? updatedAt
+      currentJob.updatedAt = updatedAt
+      project.updatedAt = updatedAt
+      setGenerationJob(currentJob)
+    }, 700 + index * 700),
+  )
+  timers.push(window.setTimeout(() => completeMockGenerationJob(project.id, user), 4600))
+  generationTimers.set(project.id, timers)
+
+  return job
+}
 
 const normalizeRegenerationMode = (mode?: string): SceneRegenerationMode => {
   if (mode === 'polish' || mode === 'shorten' || mode === 'expand') return mode
@@ -1008,6 +1111,8 @@ Mock.mock(/\/api\/projects\/[^/?]+$/, 'delete', (options: MockRequestOptions) =>
     return fail(40401, '项目不存在')
   }
 
+  clearGenerationTimers(projectId)
+  generationJobs.delete(projectId)
   projects.splice(projectIndex, 1)
   scenes = scenes.filter((scene) => scene.projectId !== projectId)
   sceneSuggestions = sceneSuggestions.filter((suggestion) => suggestion.projectId !== projectId)
@@ -1030,38 +1135,23 @@ Mock.mock(/\/api\/projects\/[^/?]+\/generate$/, 'post', (options: MockRequestOpt
     return fail(41002, '项目缺少小说文本')
   }
 
-  if (auth.user.aiPoints < 300) {
+  const activeJob = getActiveGenerationJob(projectId)
+  if (!activeJob && auth.user.aiPoints < 300) {
     return fail(50001, 'AI 点数不足')
   }
 
-  auth.user.aiPoints -= 300
-  auth.user.updatedAt = now()
-  project.status = 'completed'
-  project.errorMessage = null
-  project.updatedAt = now()
-  const existingScenes = scenes
-    .filter((scene) => scene.projectId === projectId)
-    .sort((previous, next) => previous.sceneNo - next.sceneNo)
-  scenes = scenes.filter((scene) => scene.projectId !== projectId)
-  const generatedScenes =
-    existingScenes.length > 0
-      ? createIncrementalMockScenes(projectId, existingScenes)
-      : createMockScenes(projectId)
-  scenes.push(...generatedScenes)
-  project.sceneCount = generatedScenes.length
-  const artifacts = createMockGenerationArtifacts(project, generatedScenes)
-  project.artifacts = artifacts
+  const job = activeJob ?? startMockGenerationJob(project, auth.user)
 
   return ok<GenerateProjectResponse>(
     {
       projectId,
-      status: project.status,
-      costPoints: 300,
+      jobId: job.id,
+      job,
+      status: job.status,
       remainingPoints: auth.user.aiPoints,
-      scenes: generatedScenes,
-      artifacts,
+      scenes: [],
     },
-    existingScenes.length > 0 ? '剧本增量生成成功' : '剧本生成成功',
+    activeJob ? '已有生成任务正在进行' : '生成任务已启动',
   )
 })
 
@@ -1076,18 +1166,26 @@ Mock.mock(/\/api\/projects\/[^/?]+\/generate\/status$/, 'get', (options: MockReq
     return fail(40401, '项目不存在')
   }
 
-  const statusMap: Record<string, Pick<GenerateStatusDTO, 'progress' | 'currentStep'>> = {
-    draft: { progress: 0, currentStep: 'source_indexing' },
-    generating: { progress: 60, currentStep: 'scene_writing' },
-    completed: { progress: 100, currentStep: 'final_validating' },
-    failed: { progress: 100, currentStep: project.errorMessage ?? '生成失败' },
-  }
+  const job = generationJobs.get(projectId)
+  const status = job?.status ?? project.status
+  const progress = job?.progress ?? (project.status === 'completed' ? 100 : 0)
+  const currentStep =
+    job?.currentStep ??
+    (project.status === 'completed'
+      ? 'final_validating'
+      : project.status === 'failed'
+        ? '生成失败'
+        : 'source_indexing')
 
   return ok<GenerateStatusDTO>({
     projectId,
-    status: project.status,
-    ...statusMap[project.status],
-    artifacts: project.artifacts,
+    jobId: job?.id,
+    job,
+    status,
+    progress,
+    currentStep,
+    errorMessage: job?.errorMessage ?? project.errorMessage,
+    artifacts: job?.artifacts ?? project.artifacts,
   })
 })
 
