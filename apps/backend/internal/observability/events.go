@@ -14,8 +14,6 @@ type EventType string
 const (
 	EventPipelineStart   EventType = "pipeline_start"
 	EventPipelineEnd     EventType = "pipeline_end"
-	EventTreeSnapshot    EventType = "tree_snapshot"
-	EventTreeNodeAdded   EventType = "tree_node_added"
 	EventNodeAnalyzing   EventType = "node_analyzing"
 	EventNodeAnalyzed    EventType = "node_analyzed"
 	EventNodeFailed      EventType = "node_failed"

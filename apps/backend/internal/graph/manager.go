@@ -35,17 +35,28 @@ func (m *Manager) ApplyUpdate(nodeID string, update *GraphUpdateResult) *GraphSn
 	if before == nil {
 		before = NewSnapshot(nodeID)
 	}
+	if update == nil {
+		m.snapshotsAfter[nodeID] = before.Clone()
+		m.snapshotsAfter[nodeID].NodeID = nodeID
+		return m.snapshotsAfter[nodeID]
+	}
 	after := before.Clone()
 	after.NodeID = nodeID
 
 	// Apply new characters
 	for _, nc := range update.NewCharacters {
+		if existing := after.GetCharacter(nc.ID); existing != nil && existing.Name != "" {
+			mergeCharacterState(existing, nc)
+			continue
+		}
 		after.Characters[nc.ID] = &CharacterState{
 			ID:             nc.ID,
 			Name:           nc.Name,
 			CurrentGoal:    nc.CurrentGoal,
 			EmotionalState: nc.EmotionalState,
-			Personality:    nc.Personality,
+			Personality:    append([]string(nil), nc.Personality...),
+			KnownInfo:      append([]string(nil), nc.KnownInfo...),
+			UnknownInfo:    append([]string(nil), nc.UnknownInfo...),
 		}
 	}
 
@@ -114,6 +125,27 @@ func (m *Manager) ApplyUpdate(nodeID string, update *GraphUpdateResult) *GraphSn
 	return after
 }
 
+
+func mergeCharacterState(existing *CharacterState, incoming CharacterState) {
+	if existing.Name == "" {
+		existing.Name = incoming.Name
+	}
+	if incoming.CurrentGoal != "" {
+		existing.CurrentGoal = incoming.CurrentGoal
+	}
+	if incoming.EmotionalState != "" {
+		existing.EmotionalState = incoming.EmotionalState
+	}
+	if len(incoming.Personality) > 0 {
+		existing.Personality = append([]string(nil), incoming.Personality...)
+	}
+	if len(incoming.KnownInfo) > 0 {
+		existing.KnownInfo = append(existing.KnownInfo, incoming.KnownInfo...)
+	}
+	if len(incoming.UnknownInfo) > 0 {
+		existing.UnknownInfo = append(existing.UnknownInfo, incoming.UnknownInfo...)
+	}
+}
 // ChainSnapshot sets the "before" snapshot of nextNodeID to the "after" snapshot of currentNodeID.
 func (m *Manager) ChainSnapshot(currentNodeID, nextNodeID string) {
 	if after := m.snapshotsAfter[currentNodeID]; after != nil {
