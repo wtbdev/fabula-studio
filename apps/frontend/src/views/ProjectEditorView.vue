@@ -11,6 +11,7 @@ import {
   FileSpreadsheet,
   FileText,
   FileType,
+  GitBranch,
   Lightbulb,
   MapPin,
   RefreshCw,
@@ -24,7 +25,7 @@ import { generationApi } from '../api/generation'
 import { projectsApi } from '../api/projects'
 import { scenesApi } from '../api/scenes'
 import { useAuth } from '../composables/useAuth'
-import type { GenerateStatusDTO, ProjectDTO, SceneDTO } from '../api/types'
+import type { GenerationArtifacts, GenerateStatusDTO, ProjectDTO, SceneDTO } from '../api/types'
 import SceneList from '../components/SceneList.vue'
 import ScriptEditor from '../components/ScriptEditor.vue'
 import AiSuggestionPanel from '../components/editor/AiSuggestionPanel.vue'
@@ -32,7 +33,7 @@ import SceneRegenerateModal from '../components/editor/SceneRegenerateModal.vue'
 
 type SaveStatus = 'saved' | 'dirty' | 'saving' | 'failed'
 type WorkbenchMode = 'script' | 'settings'
-type ExtensionTab = 'info' | 'source' | 'suggestions'
+type ExtensionTab = 'info' | 'source' | 'suggestions' | 'artifacts'
 
 const route = useRoute()
 const router = useRouter()
@@ -44,6 +45,7 @@ const projectId = computed(() => route.params.id as string)
 const project = ref<ProjectDTO | null>(null)
 const scenes = ref<SceneDTO[]>([])
 const generateStatus = ref<GenerateStatusDTO | null>(null)
+const generationArtifacts = ref<GenerationArtifacts | null>(null)
 const activeSceneId = ref<string | null>(null)
 const editorContent = ref('')
 const saveStatus = ref<SaveStatus>('saved')
@@ -143,6 +145,57 @@ const hasProjectSettingsChanged = computed(() => {
   )
 })
 
+const stageLabelMap: Record<string, string> = {
+  source_indexing: '原文索引构建中',
+  beat_extracting: '故事节拍提取中',
+  beat_reconciling: '节拍边界校准中',
+  scene_planning: '场景规划中',
+  scene_writing: '场景写作中',
+  graph_updating: '关系图谱更新中',
+  editor_reviewing: '主编审校中',
+  final_validating: '最终校验中',
+}
+
+const generationStepLabel = computed(() => {
+  const currentStep = generateStatus.value?.currentStep
+  if (!currentStep) return '暂无生成状态'
+
+  return stageLabelMap[currentStep] ?? currentStep
+})
+
+const applyGenerationArtifacts = (artifacts?: GenerationArtifacts) => {
+  if (artifacts) generationArtifacts.value = artifacts
+}
+
+const sourceIndexChapterCount = computed(
+  () => generationArtifacts.value?.sourceIndex?.chapters?.length ?? 0,
+)
+
+const storyBeatCount = computed(() => generationArtifacts.value?.storyBeats?.length ?? 0)
+const scenePlanCount = computed(() => generationArtifacts.value?.scenePlan?.length ?? 0)
+
+const hasGenerationArtifacts = computed(
+  () =>
+    Boolean(generationArtifacts.value?.sourceIndex) ||
+    storyBeatCount.value > 0 ||
+    scenePlanCount.value > 0 ||
+    Boolean(generationArtifacts.value?.graphSnapshot) ||
+    Boolean(generationArtifacts.value?.warnings?.length),
+)
+
+const graphSnapshotItems = computed(() => {
+  const snapshot = generationArtifacts.value?.graphSnapshot
+  if (!snapshot) return []
+
+  return [
+    ['节点', snapshot.nodeCount],
+    ['边', snapshot.edgeCount],
+    ['角色', snapshot.characterCount],
+    ['关系', snapshot.relationshipCount],
+    ['更新时间', snapshot.updatedAt ? formatDate(snapshot.updatedAt) : undefined],
+  ].filter((item): item is [string, string | number] => item[1] !== undefined && item[1] !== null)
+})
+
 const projectConfigItems = computed(() => {
   const config = project.value?.config
   if (!config) return []
@@ -173,7 +226,9 @@ const formatDate = (value?: string) => {
 const loadProject = async () => {
   try {
     project.value = await projectsApi.detail(projectId.value)
+    applyGenerationArtifacts(project.value.artifacts)
     generateStatus.value = await generationApi.status(projectId.value)
+    applyGenerationArtifacts(generateStatus.value.artifacts)
   } catch {
     message.error('项目加载失败')
   }
@@ -444,15 +499,19 @@ const handleGenerateProject = async () => {
     projectId: project.value.id,
     status: 'generating',
     progress: 64,
-    currentStep: '正在基于当前剧本增量生成，并同步人物关系',
+    currentStep: 'scene_writing',
   }
 
   try {
-    const result = await generationApi.generate(project.value.id)
+    const result = await generationApi.generate(project.value.id, {
+      config: project.value.config,
+      adaptationProfile: project.value.adaptationProfile,
+    })
     const generatedScenes = [...result.scenes].sort(
       (previous, next) => previous.sceneNo - next.sceneNo,
     )
     scenes.value = generatedScenes
+    applyGenerationArtifacts(result.artifacts)
     project.value = {
       ...project.value,
       status: result.status,
@@ -460,6 +519,7 @@ const handleGenerateProject = async () => {
       updatedAt: new Date().toISOString(),
     }
     generateStatus.value = await generationApi.status(project.value.id)
+    applyGenerationArtifacts(generateStatus.value.artifacts)
     if (authState.user) {
       authState.user.aiPoints = result.remainingPoints
     }
@@ -772,7 +832,7 @@ watch(
                 :percentage="generateStatus.progress"
                 :indicator-placement="'inside'"
               />
-              <p>{{ generateStatus?.currentStep ?? '暂无生成状态' }}</p>
+              <p>{{ generationStepLabel }}</p>
             </section>
 
             <section v-if="projectConfigItems.length" class="settings-section">
@@ -842,10 +902,18 @@ watch(
               <n-icon><Lightbulb /></n-icon>
               AI 建议
             </button>
+            <button
+              type="button"
+              :class="{ active: extensionTab === 'artifacts' }"
+              @click="extensionTab = 'artifacts'"
+            >
+              <n-icon><GitBranch /></n-icon>
+              生成产物
+            </button>
           </div>
 
-          <div v-if="activeScene" class="extension-content">
-            <section v-if="extensionTab === 'info'" class="extension-card">
+          <div v-if="activeScene || extensionTab === 'artifacts'" class="extension-content">
+            <section v-if="extensionTab === 'info' && activeScene" class="extension-card">
               <span class="extension-icon"><n-icon><BookOpenText /></n-icon></span>
               <h2>{{ activeScene.title }}</h2>
               <p>{{ activeScene.summary || '当前场次暂无概要。' }}</p>
@@ -925,7 +993,7 @@ watch(
               </n-collapse>
             </section>
 
-            <section v-else-if="extensionTab === 'source'" class="extension-card">
+            <section v-else-if="extensionTab === 'source' && activeScene" class="extension-card">
               <span class="extension-icon brick"><n-icon><FileText /></n-icon></span>
               <h2>原文依据</h2>
               <p>{{ sourceSummary || '暂无原文依据摘要。' }}</p>
@@ -940,8 +1008,89 @@ watch(
               </div>
             </section>
 
+            <section v-else-if="extensionTab === 'artifacts'" class="extension-card artifact-card">
+              <span class="extension-icon"><n-icon><GitBranch /></n-icon></span>
+              <h2>生成产物</h2>
+
+              <div v-if="hasGenerationArtifacts" class="artifact-stack">
+                <section class="artifact-section">
+                  <div class="artifact-section-heading">
+                    <h3>原文索引</h3>
+                    <n-tag size="small" :bordered="false" type="info">
+                      {{ sourceIndexChapterCount }} 章
+                    </n-tag>
+                  </div>
+                  <p>{{ generationArtifacts?.sourceIndex?.summary || '已接收原文索引，暂无摘要。' }}</p>
+                  <n-space v-if="generationArtifacts?.sourceIndex?.characterNames?.length" size="small">
+                    <n-tag
+                      v-for="character in generationArtifacts.sourceIndex.characterNames"
+                      :key="character"
+                      size="small"
+                      :bordered="false"
+                    >
+                      {{ character }}
+                    </n-tag>
+                  </n-space>
+                </section>
+
+                <section v-if="generationArtifacts?.storyBeats?.length" class="artifact-section">
+                  <div class="artifact-section-heading">
+                    <h3>故事节拍</h3>
+                    <n-tag size="small" :bordered="false" type="success">{{ storyBeatCount }} 条</n-tag>
+                  </div>
+                  <ol class="artifact-list">
+                    <li v-for="beat in generationArtifacts.storyBeats" :key="beat.id">
+                      <strong>{{ beat.title || `节拍 ${beat.order ?? beat.id}` }}</strong>
+                      <p>{{ beat.summary }}</p>
+                    </li>
+                  </ol>
+                </section>
+
+                <section v-if="generationArtifacts?.scenePlan?.length" class="artifact-section">
+                  <div class="artifact-section-heading">
+                    <h3>场景规划</h3>
+                    <n-tag size="small" :bordered="false" type="warning">{{ scenePlanCount }} 场</n-tag>
+                  </div>
+                  <ol class="artifact-list">
+                    <li v-for="plan in generationArtifacts.scenePlan" :key="plan.id">
+                      <strong>{{ plan.title || `场景 ${plan.sceneNo ?? plan.id}` }}</strong>
+                      <p>{{ plan.purpose || '该场景计划未提供目的说明。' }}</p>
+                    </li>
+                  </ol>
+                </section>
+
+                <section v-if="generationArtifacts?.warnings?.length" class="artifact-section warning">
+                  <div class="artifact-section-heading">
+                    <h3>校验警告</h3>
+                    <n-tag size="small" :bordered="false" type="error">
+                      {{ generationArtifacts.warnings.length }} 条
+                    </n-tag>
+                  </div>
+                  <ul class="artifact-warning-list">
+                    <li v-for="warning in generationArtifacts.warnings" :key="warning">{{ warning }}</li>
+                  </ul>
+                </section>
+
+                <section v-if="generationArtifacts?.graphSnapshot" class="artifact-section">
+                  <div class="artifact-section-heading">
+                    <h3>图谱快照</h3>
+                    <n-tag size="small" :bordered="false" type="info">GraphAfter</n-tag>
+                  </div>
+                  <p>{{ generationArtifacts.graphSnapshot.summary || '图谱快照已更新。' }}</p>
+                  <dl v-if="graphSnapshotItems.length" class="config-grid artifact-graph-grid">
+                    <div v-for="[label, value] in graphSnapshotItems" :key="label">
+                      <dt>{{ label }}</dt>
+                      <dd>{{ value }}</dd>
+                    </div>
+                  </dl>
+                </section>
+              </div>
+
+              <n-empty v-else description="当前生成接口尚未返回结构化产物。" />
+            </section>
+
             <AiSuggestionPanel
-              v-else
+              v-else-if="activeScene"
               :project-id="project?.id ?? null"
               :scene-id="activeScene.id"
               :scene-title="activeScene.title"
@@ -1264,7 +1413,7 @@ watch(
 
 .extension-tabs {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   border-bottom: 1px solid var(--color-line);
 }
 
@@ -1337,6 +1486,72 @@ watch(
   color: var(--color-muted);
   font-size: 14px;
   line-height: 1.75;
+}
+
+.artifact-stack {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.artifact-section {
+  padding: 12px;
+  border: 1px solid var(--color-line);
+  border-radius: 8px;
+  background: rgba(255, 253, 248, 0.72);
+}
+
+.artifact-section.warning {
+  border-color: rgba(141, 73, 56, 0.28);
+  background: rgba(141, 73, 56, 0.06);
+}
+
+.artifact-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.artifact-section-heading h3 {
+  margin: 0;
+  color: var(--color-ink);
+  font-size: 14px;
+}
+
+.artifact-list,
+.artifact-warning-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.artifact-list li::marker,
+.artifact-warning-list li::marker {
+  color: var(--color-sage);
+  font-weight: 800;
+}
+
+.artifact-list strong {
+  color: var(--color-ink);
+  font-size: 13px;
+}
+
+.artifact-list p,
+.artifact-warning-list li {
+  color: var(--color-muted);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.artifact-list p {
+  margin: 4px 0 0;
+}
+
+.artifact-graph-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .scene-facts {

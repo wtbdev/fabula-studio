@@ -205,7 +205,10 @@ const handleGenerateProject = async (project: ProjectDTO) => {
   generatingProjectId.value = project.id
 
   try {
-    await generationApi.generate(project.id)
+    await generationApi.generate(project.id, {
+      config: project.config,
+      adaptationProfile: project.adaptationProfile,
+    })
     message.success('剧本生成成功，已扣除 300 点')
     await fetchMe()
     await fetchProjects()

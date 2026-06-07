@@ -1,11 +1,11 @@
 import { apiClient } from './request'
-import type { GenerateProjectResponse, GenerateStatusDTO } from './types'
+import type { GenerateProjectRequest, GenerateProjectResponse, GenerateStatusDTO } from './types'
 
 export const generationApi = {
-  generate(projectId: string) {
-    return apiClient.post<GenerateProjectResponse, Record<string, never>>(
+  generate(projectId: string, payload: GenerateProjectRequest = {}) {
+    return apiClient.post<GenerateProjectResponse, GenerateProjectRequest>(
       `/projects/${projectId}/generate`,
-      {},
+      payload,
     )
   },
 

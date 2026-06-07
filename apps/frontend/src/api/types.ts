@@ -50,6 +50,76 @@ export interface AdaptConfig {
   narrationLevel?: NarrationLevel
   customPrompt?: string
 }
+export interface AdaptationProfile {
+  style: AdaptStyle
+  dialogueLevel: DialogueLevel
+  adaptationMode: AdaptationMode
+  sceneGranularity?: SceneGranularity
+  narrationLevel?: NarrationLevel
+  guidance?: string
+}
+
+export interface SourceIndexChapter {
+  id?: string
+  title: string
+  order?: number
+  summary?: string
+  startOffset?: number
+  endOffset?: number
+}
+
+export interface SourceIndex {
+  title?: string
+  chapters?: SourceIndexChapter[]
+  characterNames?: string[]
+  locationNames?: string[]
+  summary?: string
+}
+
+export interface StoryBeat {
+  id: string
+  order?: number
+  title?: string
+  summary: string
+  sourceChapterIds?: string[]
+  characters?: string[]
+  warnings?: string[]
+}
+
+export interface ScenePlanItem {
+  id: string
+  sceneNo?: number
+  title?: string
+  purpose?: string
+  sourceBeatIds?: string[]
+  sourceNodeIds?: string[]
+  characters?: string[]
+  location?: string
+  warnings?: string[]
+}
+
+export interface GraphSnapshotSummary {
+  nodeCount?: number
+  edgeCount?: number
+  characterCount?: number
+  relationshipCount?: number
+  summary?: string
+  updatedAt?: string
+}
+
+export interface GenerationArtifacts {
+  sourceIndex?: SourceIndex
+  storyBeats?: StoryBeat[]
+  scenePlan?: ScenePlanItem[]
+  warnings?: string[]
+  graphSnapshot?: GraphSnapshotSummary
+}
+
+export interface GenerateProjectRequest {
+  config?: AdaptConfig
+  adaptationProfile?: AdaptationProfile
+}
+
 
 export interface ProjectDTO {
   id: string
@@ -58,6 +128,8 @@ export interface ProjectDTO {
   novelTitle?: string
   sourceText?: string
   config?: AdaptConfig
+  adaptationProfile?: AdaptationProfile
+  artifacts?: GenerationArtifacts
   status: ProjectStatus
   errorMessage?: string | null
   sceneCount?: number
@@ -70,6 +142,7 @@ export interface CreateProjectRequest {
   novelTitle?: string
   sourceText: string
   config: AdaptConfig
+  adaptationProfile?: AdaptationProfile
 }
 
 export interface UpdateProjectRequest {
@@ -114,6 +187,7 @@ export interface GenerateProjectResponse {
   costPoints: number
   remainingPoints: number
   scenes: SceneDTO[]
+  artifacts?: GenerationArtifacts
 }
 
 export interface GenerateStatusDTO {
@@ -121,6 +195,7 @@ export interface GenerateStatusDTO {
   status: ProjectStatus
   progress: number
   currentStep: string
+  artifacts?: GenerationArtifacts
 }
 
 export interface UpdateSceneRequest {

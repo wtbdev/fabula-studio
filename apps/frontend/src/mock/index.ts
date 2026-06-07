@@ -2,6 +2,8 @@ import Mock from 'mockjs'
 import { authTokenStorageKey } from '../api/request'
 import type {
   AdaptConfig,
+  AdaptationProfile,
+  GenerationArtifacts,
   ApiResponse,
   AuthTokenDTO,
   CreateProjectRequest,
@@ -76,6 +78,16 @@ const defaultConfig: AdaptConfig = {
   narrationLevel: '少量保留',
   customPrompt: '减少旁白，增强对白冲突。',
 }
+
+const toAdaptationProfile = (config: AdaptConfig): AdaptationProfile => ({
+  style: config.style,
+  dialogueLevel: config.dialogueLevel,
+  adaptationMode: config.adaptationMode,
+  sceneGranularity: config.sceneGranularity,
+  narrationLevel: config.narrationLevel,
+  guidance: config.customPrompt,
+})
+
 
 const users: MockUser[] = [
   {
@@ -270,6 +282,12 @@ const projects: ProjectDTO[] = [
     updatedAt: '2026-06-05T10:35:00.000Z',
   },
 ]
+
+projects.forEach((project) => {
+  if (!project.adaptationProfile && project.config) {
+    project.adaptationProfile = toAdaptationProfile(project.config)
+  }
+})
 
 const createStressTestScenes = (projectId: string) => {
   const locations = ['雪线驿站', '药师木屋', '白桦林', '北境关口', '旧矿洞', '山神庙']
@@ -663,6 +681,7 @@ const createMockSuggestions = (scene: SceneDTO, content: string, count?: number)
       projectId: scene.projectId,
       sceneId: scene.id,
       title: index === 0 ? `${template.title}：${scene.title}` : template.title,
+
       reason:
         index === 1
           ? `${template.reason}（mock 分析：${contentHint}，可继续强化 ${primaryCharacter} 与 ${secondaryCharacter} 的试探。）`
@@ -675,6 +694,45 @@ const createMockSuggestions = (scene: SceneDTO, content: string, count?: number)
     return suggestion
   })
 }
+
+const createMockGenerationArtifacts = (project: ProjectDTO, generatedScenes: SceneDTO[]): GenerationArtifacts => ({
+  sourceIndex: {
+    title: project.novelTitle || project.title,
+    summary: `${project.novelTitle || project.title} 已完成章节索引，可用于追踪场次与原文依据。`,
+    chapters: [
+      { id: 'chapter_001', order: 1, title: '第一章', summary: '主角接触核心线索。' },
+      { id: 'chapter_002', order: 2, title: '第二章', summary: '冲突升级并指向下一步行动。' },
+      { id: 'chapter_003', order: 3, title: '第三章', summary: '关键人物关系发生转折。' },
+    ],
+    characterNames: collectSceneCharacters(generatedScenes),
+  },
+  storyBeats: generatedScenes.slice(0, 5).map((scene, index) => ({
+    id: `beat_${String(index + 1).padStart(3, '0')}`,
+    order: index + 1,
+    title: scene.title,
+    summary: scene.summary || `${scene.title} 推进主要调查线。`,
+    sourceChapterIds: [`chapter_${String(Math.min(index + 1, 3)).padStart(3, '0')}`],
+    characters: scene.rawJson?.characters,
+  })),
+  scenePlan: generatedScenes.map((scene) => ({
+    id: `plan_${String(scene.sceneNo).padStart(3, '0')}`,
+    sceneNo: scene.sceneNo,
+    title: scene.title,
+    purpose: scene.summary || '承接原文节拍并转换为可拍摄场次。',
+    sourceBeatIds: [`beat_${String(Math.min(scene.sceneNo, 5)).padStart(3, '0')}`],
+    characters: scene.rawJson?.characters,
+    location: scene.location,
+  })),
+  warnings: generatedScenes.length > 8 ? ['生成场次数量较多，建议检查后半段节奏。'] : [],
+  graphSnapshot: {
+    nodeCount: collectSceneCharacters(generatedScenes).length + generatedScenes.length,
+    edgeCount: Math.max(generatedScenes.length - 1, 0),
+    characterCount: collectSceneCharacters(generatedScenes).length,
+    relationshipCount: Math.max(collectSceneCharacters(generatedScenes).length - 1, 0),
+    summary: '人物与场次关系已随生成结果更新。',
+    updatedAt: now(),
+  },
+})
 
 const normalizeRegenerationMode = (mode?: string): SceneRegenerationMode => {
   if (mode === 'polish' || mode === 'shorten' || mode === 'expand') return mode
@@ -884,6 +942,7 @@ Mock.mock(/\/api\/projects$/, 'post', (options: MockRequestOptions) => {
     novelTitle: payload.novelTitle,
     sourceText: payload.sourceText,
     config: payload.config,
+    adaptationProfile: payload.adaptationProfile ?? toAdaptationProfile(payload.config),
     status: 'draft',
     sceneCount: 0,
     errorMessage: null,
@@ -990,6 +1049,8 @@ Mock.mock(/\/api\/projects\/[^/?]+\/generate$/, 'post', (options: MockRequestOpt
       : createMockScenes(projectId)
   scenes.push(...generatedScenes)
   project.sceneCount = generatedScenes.length
+  const artifacts = createMockGenerationArtifacts(project, generatedScenes)
+  project.artifacts = artifacts
 
   return ok<GenerateProjectResponse>(
     {
@@ -998,6 +1059,7 @@ Mock.mock(/\/api\/projects\/[^/?]+\/generate$/, 'post', (options: MockRequestOpt
       costPoints: 300,
       remainingPoints: auth.user.aiPoints,
       scenes: generatedScenes,
+      artifacts,
     },
     existingScenes.length > 0 ? '剧本增量生成成功' : '剧本生成成功',
   )
@@ -1015,9 +1077,9 @@ Mock.mock(/\/api\/projects\/[^/?]+\/generate\/status$/, 'get', (options: MockReq
   }
 
   const statusMap: Record<string, Pick<GenerateStatusDTO, 'progress' | 'currentStep'>> = {
-    draft: { progress: 0, currentStep: '等待生成' },
-    generating: { progress: 60, currentStep: '正在拆分剧本场次' },
-    completed: { progress: 100, currentStep: '剧本生成完成' },
+    draft: { progress: 0, currentStep: 'source_indexing' },
+    generating: { progress: 60, currentStep: 'scene_writing' },
+    completed: { progress: 100, currentStep: 'final_validating' },
     failed: { progress: 100, currentStep: project.errorMessage ?? '生成失败' },
   }
 
@@ -1025,6 +1087,7 @@ Mock.mock(/\/api\/projects\/[^/?]+\/generate\/status$/, 'get', (options: MockReq
     projectId,
     status: project.status,
     ...statusMap[project.status],
+    artifacts: project.artifacts,
   })
 })
 

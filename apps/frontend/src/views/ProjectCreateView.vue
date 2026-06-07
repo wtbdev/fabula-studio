@@ -15,6 +15,7 @@ import { useAuth } from '../composables/useAuth'
 import { getFormValidationMessage } from '../utils/formErrors'
 import type { FormInst, FormRules } from 'naive-ui'
 import type {
+  AdaptationProfile,
   AdaptationMode,
   AdaptStyle,
   CreateProjectRequest,
@@ -90,19 +91,34 @@ const getErrorMessage = (error: unknown) => {
   return error instanceof Error ? error.message : '操作失败，请稍后重试'
 }
 
-const buildPayload = (): CreateProjectRequest => ({
-  title: formModel.title.trim(),
-  novelTitle: formModel.novelTitle.trim() || undefined,
-  sourceText: formModel.sourceText.trim(),
-  config: {
-    style: formModel.style.trim() as AdaptStyle,
-    dialogueLevel: formModel.dialogueLevel,
-    adaptationMode: formModel.adaptationMode,
-    sceneGranularity: formModel.sceneGranularity,
-    narrationLevel: formModel.narrationLevel,
-    customPrompt: formModel.customPrompt.trim() || undefined,
-  },
+const buildAdaptationProfile = (): AdaptationProfile => ({
+  style: formModel.style.trim() as AdaptStyle,
+  dialogueLevel: formModel.dialogueLevel,
+  adaptationMode: formModel.adaptationMode,
+  sceneGranularity: formModel.sceneGranularity,
+  narrationLevel: formModel.narrationLevel,
+  guidance: formModel.customPrompt.trim() || undefined,
 })
+
+
+const buildPayload = (): CreateProjectRequest => {
+  const adaptationProfile = buildAdaptationProfile()
+
+  return {
+    title: formModel.title.trim(),
+    novelTitle: formModel.novelTitle.trim() || undefined,
+    sourceText: formModel.sourceText.trim(),
+    config: {
+      style: adaptationProfile.style,
+      dialogueLevel: adaptationProfile.dialogueLevel,
+      adaptationMode: adaptationProfile.adaptationMode,
+      sceneGranularity: adaptationProfile.sceneGranularity,
+      narrationLevel: adaptationProfile.narrationLevel,
+      customPrompt: adaptationProfile.guidance,
+    },
+    adaptationProfile,
+  }
+}
 
 const createProject = async () => {
   await formRef.value?.validate()
@@ -161,7 +177,10 @@ const handleCreateAndGenerate = async () => {
 
   try {
     const project = await createProject()
-    await generationApi.generate(project.id)
+    await generationApi.generate(project.id, {
+      config: project.config,
+      adaptationProfile: project.adaptationProfile ?? buildAdaptationProfile(),
+    })
     await fetchMe()
     message.success('剧本生成成功，已扣除 300 点')
     await router.push(`/projects/${project.id}/edit`)
