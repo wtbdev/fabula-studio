@@ -24,14 +24,15 @@ import (
 
 // Server holds dependencies and registered handlers.
 type Server struct {
-	config    config.Config
-	pipeline  *pipeline.Pipeline
-	eventBus  *observability.EventBus
-	telemetry *observability.Telemetry
-	agui      *AGUIServer
-	store     *repo.Store
-	pool      *pgxpool.Pool
-	http      *http.Server
+	config     config.Config
+	pipeline   *pipeline.Pipeline
+	eventBus   *observability.EventBus
+	telemetry  *observability.Telemetry
+	agui       *AGUIServer
+	store      *repo.Store
+	generation *GenerationService
+	pool       *pgxpool.Pool
+	http       *http.Server
 }
 
 // New creates and returns a configured Server.
@@ -48,7 +49,7 @@ func New(cfg config.Config) *Server {
 	if err != nil {
 		log.Printf("Warning: Failed to initialize telemetry: %v", err)
 	}
-	p := pipeline.New(pipeline.DefaultConfig(), cfg.ModelName, cfg.APIKey, cfg.BaseURL, eventBus)
+	p := pipeline.New(pipelineConfigFromAppConfig(cfg), cfg.ModelName, cfg.APIKey, cfg.BaseURL, eventBus)
 	if err := db.RunMigrations(cfg.DatabaseURL); err != nil {
 		log.Fatalf("failed to run database migrations: %v", err)
 	}
@@ -60,15 +61,17 @@ func New(cfg config.Config) *Server {
 
 	// Initialize AG-UI server
 	agui := NewAGUIServer(cfg.ModelName, cfg.APIKey, cfg.BaseURL, eventBus)
+	generation := NewGenerationService(cfg, eventBus, store)
 
 	srv := &Server{
-		config:    cfg,
-		pipeline:  p,
-		eventBus:  eventBus,
-		telemetry: telemetry,
-		agui:      agui,
-		store:     store,
-		pool:      pool,
+		config:     cfg,
+		pipeline:   p,
+		eventBus:   eventBus,
+		telemetry:  telemetry,
+		agui:       agui,
+		store:      store,
+		generation: generation,
+		pool:       pool,
 	}
 
 	mux := http.NewServeMux()
@@ -82,7 +85,6 @@ func New(cfg config.Config) *Server {
 	mux.HandleFunc("/api/events/stream", eventBus.SSEHandler())
 	mux.HandleFunc("/api/trace", srv.handleTraceInfo)
 	mux.HandleFunc("/api/pipeline/status", srv.handlePipelineStatus)
-	mux.HandleFunc("/api/tree", srv.handleTree)
 	mux.HandleFunc("/api/graph", srv.handleGraph)
 	mux.HandleFunc("/api/plans", srv.handlePlans)
 	mux.HandleFunc("/api/screenplay", srv.handleScreenplay)
@@ -211,15 +213,6 @@ func (s *Server) handlePipelineStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.pipeline.Status())
 }
 
-// handleTree returns the complete story tree from the last pipeline run.
-func (s *Server) handleTree(w http.ResponseWriter, r *http.Request) {
-	result := s.pipeline.Result()
-	if result == nil || result.Tree == nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no pipeline result available"})
-		return
-	}
-	writeJSON(w, http.StatusOK, result.Tree)
-}
 
 // graphResponse is the JSON-serializable view of the character graph.
 type graphResponse struct {
