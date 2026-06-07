@@ -47,6 +47,55 @@ func TestNormalizeScenePlansJSONAcceptsWrappedCamelCaseOutput(t *testing.T) {
 	}
 }
 
+func TestParseScenePlansJSONAcceptsSinglePlanObject(t *testing.T) {
+	raw := `{
+		"characters":["叙述者","她"],
+		"id":"plan_020",
+		"key_plot_points":["叙述者指出她在乎平凡事物","两人沉默无语"],
+		"location":"从日落处返回的途中",
+		"omit_details":["具体的路径描述"],
+		"purpose":"揭示核心冲突",
+		"scene_count":1,
+		"sequence":20,
+		"source_candidate_ids":["candidate_020"],
+		"time_frame":"夜晚（星星出现）"
+	}`
+
+	normalized := normalizeScenePlansJSON(raw)
+	plans, err := parseScenePlansJSON(normalized)
+	if err != nil {
+		t.Fatalf("unexpected parse error: %v\n%s", err, normalized)
+	}
+	if len(plans) != 1 {
+		t.Fatalf("expected one plan, got %d", len(plans))
+	}
+	plan := plans[0]
+	if plan.ID != "plan_020" {
+		t.Fatalf("unexpected id: %q", plan.ID)
+	}
+	if plan.SceneCount != 1 {
+		t.Fatalf("unexpected scene count: %d", plan.SceneCount)
+	}
+	if len(plan.SourceCandidateIDs) != 1 || plan.SourceCandidateIDs[0] != "candidate_020" {
+		t.Fatalf("unexpected source IDs: %#v", plan.SourceCandidateIDs)
+	}
+	if len(plan.Characters) != 2 || plan.Characters[1] != "她" {
+		t.Fatalf("unexpected characters: %#v", plan.Characters)
+	}
+	if len(plan.KeyPlotPoints) != 2 {
+		t.Fatalf("unexpected key points: %#v", plan.KeyPlotPoints)
+	}
+	if len(plan.OmitDetails) != 1 {
+		t.Fatalf("unexpected omit details: %#v", plan.OmitDetails)
+	}
+	if plan.Sequence != 20 {
+		t.Fatalf("unexpected sequence: %d", plan.Sequence)
+	}
+	if plan.TimeFrame != "夜晚（星星出现）" {
+		t.Fatalf("unexpected time frame: %q", plan.TimeFrame)
+	}
+}
+
 func TestValidateAndRepairScenePlansNormalizesSmallModelOutput(t *testing.T) {
 	plans := []*scene.ScenePlan{
 		{

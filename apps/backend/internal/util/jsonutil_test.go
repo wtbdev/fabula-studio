@@ -87,3 +87,25 @@ func TestPrepareYAMLStripsFence(t *testing.T) {
 		t.Fatalf("unexpected YAML: %q", got)
 	}
 }
+
+func TestPrepareYAMLRepairsBareHeading(t *testing.T) {
+	raw := "外景 草原 - 日间\nsetting:\n  location: 草原"
+	got, err := PrepareYAML(raw, "scene writer output")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.HasPrefix(got, `heading: "外景 草原 - 日间"`) {
+		t.Fatalf("expected heading prefix, got: %q", got)
+	}
+}
+
+func TestPrepareYAMLDoesNotDoubleWrapValidKey(t *testing.T) {
+	raw := "id: scene_001\nheading: 外景 客厅 - 日"
+	got, err := PrepareYAML(raw, "scene writer output")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.HasPrefix(got, "id:") {
+		t.Fatalf("expected unchanged prefix, got: %q", got)
+	}
+}

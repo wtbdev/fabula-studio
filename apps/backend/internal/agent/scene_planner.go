@@ -129,6 +129,13 @@ func parseScenePlansJSON(raw string) ([]*scene.ScenePlan, error) {
 		}
 	}
 
+	// Single plan object (not wrapped in array or {"plans":[...]})
+	var single scene.ScenePlan
+	if err := json.Unmarshal([]byte(raw), &single); err == nil && single.ID != "" {
+		return []*scene.ScenePlan{&single}, nil
+	}
+
+
 	var planMap map[string]*scene.ScenePlan
 	if err := json.Unmarshal([]byte(raw), &planMap); err != nil {
 		return nil, fmt.Errorf("failed to parse scene plans JSON: %w\nraw: %s", err, raw)

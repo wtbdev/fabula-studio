@@ -33,7 +33,23 @@ func RepairYAML(raw string) string {
 		raw = strings.TrimSpace(raw)
 	}
 
+	// Fix bare heading: LLM sometimes outputs heading value without the key,
+	// e.g. starting with "外景 草原 - 日间" instead of `heading: "外景 草原 - 日间"`.
 	lines := strings.Split(raw, "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		// If first non-empty line doesn't start with a YAML mapping key (word: ...),
+		// treat the whole line as a bare heading value.
+		if !looksLikeYAMLKey(trimmed) {
+			escaped := strings.ReplaceAll(trimmed, `"`, `\"`)
+			lines[i] = `heading: "` + escaped + `"`
+		}
+		break
+	}
+	raw = strings.Join(lines, "\n")
 	var fixed []string
 
 	for _, line := range lines {
@@ -67,4 +83,26 @@ func RepairYAML(raw string) string {
 	}
 
 	return strings.Join(fixed, "\n")
+}
+
+// looksLikeYAMLKey reports whether s starts with a YAML mapping key (word: ...).
+func looksLikeYAMLKey(s string) bool {
+	colon := strings.Index(s, ":")
+	if colon <= 0 {
+		return false
+	}
+	key := s[:colon]
+	if len(key) == 0 {
+		return false
+	}
+	for _, c := range key {
+		if !isYAMLKeyRune(c) {
+			return false
+		}
+	}
+	return true
+}
+
+func isYAMLKeyRune(c rune) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-'
 }
