@@ -272,69 +272,34 @@ func (p *Pipeline) Convert(ctx context.Context, title, author string, chapters [
 	p.status.Progress = 45
 	p.mu.Unlock()
 
-	// Step 3: Plan scenes via location/time clustering + concurrent per-cluster planning
+	// Step 3: Plan scenes from all candidates in one call so LLM can merge adjacent
+	// candidates into single scenes even when location/time differ (narrative continuity).
+	// This step is lightweight (plan metadata only) — the heavy writes are parallel.
 	stepStart = time.Now()
 	ctx, planSpan := p.tracer.Start(ctx, "pipeline.plan_scenes")
 	setPipelineStepAttributes(planSpan, "plan_scenes", 55)
 	p.publishEvent(observability.PipelineEvent{
 		Type:    observability.EventScenePlanning,
 		Step:    "plan_scenes",
-		Message: fmt.Sprintf("步骤 3/6: 规划场景 (%d 候选, 按地点/时间聚类)...", len(state.SceneCandidates)),
+		Message: fmt.Sprintf("步骤 3/6: 规划场景 (%d 候选)...", len(state.SceneCandidates)),
 	})
+	state.Plans, err = p.scenePlanner.PlanFromCandidates(ctx, state.SceneCandidates)
+	if err != nil {
+		planSpan.RecordError(err)
+		planSpan.End()
+		p.mu.Lock()
+		p.status.State = "failed"
+		p.status.Error = err.Error()
+		p.mu.Unlock()
+		p.publishEvent(observability.PipelineEvent{
+			Type:  observability.EventError,
+			Step:  "plan_scenes",
+			Error: err.Error(),
+		})
+		return nil, fmt.Errorf("scene planning failed: %w", err)
+	}
+	state.Plans = scene.ValidateAndRepairScenePlans(state.Plans, state.SceneCandidates)
 
-	clusters := clusterSceneCandidates(state.SceneCandidates)
-
-	type clusterPlans struct {
-		index int
-		plans []*scene.ScenePlan
-		err   error
-	}
-	results := make([]clusterPlans, len(clusters))
-
-	concurrency := p.config.MaxConcurrency
-	if concurrency < 1 {
-		concurrency = 1
-	}
-	if concurrency > len(clusters) {
-		concurrency = len(clusters)
-	}
-	jobIdx := make(chan int, len(clusters))
-	var wg sync.WaitGroup
-	for range concurrency {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for i := range jobIdx {
-				plans, err := p.scenePlanner.PlanFromCandidates(ctx, clusters[i])
-				results[i] = clusterPlans{index: i, plans: plans, err: err}
-			}
-		}()
-	}
-	for i := range clusters {
-		jobIdx <- i
-	}
-	close(jobIdx)
-	wg.Wait()
-
-	allPlans := make([]*scene.ScenePlan, 0, len(state.SceneCandidates))
-	for _, r := range results {
-		if r.err != nil {
-			planSpan.RecordError(r.err)
-			planSpan.End()
-			p.mu.Lock()
-			p.status.State = "failed"
-			p.status.Error = r.err.Error()
-			p.mu.Unlock()
-			p.publishEvent(observability.PipelineEvent{
-				Type:  observability.EventError,
-				Step:  "plan_scenes",
-				Error: r.err.Error(),
-			})
-			return nil, fmt.Errorf("scene planning failed for cluster %d: %w", r.index, r.err)
-		}
-		allPlans = append(allPlans, r.plans...)
-	}
-	state.Plans = scene.ValidateAndRepairScenePlans(allPlans, state.SceneCandidates)
 	if err := validatePlanGrounding(state.Plans, state.SceneCandidates); err != nil {
 		planSpan.RecordError(err)
 		planSpan.End()
