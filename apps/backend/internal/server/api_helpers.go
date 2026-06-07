@@ -9,6 +9,7 @@ import (
 
 	"github.com/fabula-studio/backend/internal/db/sqlc"
 	"github.com/fabula-studio/backend/internal/pipeline"
+	"github.com/fabula-studio/backend/internal/repo"
 	"github.com/fabula-studio/backend/internal/schema"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -35,6 +36,10 @@ const (
 
 func writeAPISuccess[T any](w http.ResponseWriter, message string, data T) {
 	writeJSON(w, http.StatusOK, apiResponse[T]{Code: codeSuccess, Message: message, Data: data})
+}
+
+func writeAPISuccessStatus[T any](w http.ResponseWriter, status int, message string, data T) {
+	writeJSON(w, status, apiResponse[T]{Code: codeSuccess, Message: message, Data: data})
 }
 
 func writeAPIError(w http.ResponseWriter, status, code int, message string) {
@@ -116,6 +121,32 @@ func generationArtifactsFromPipeline(result *pipeline.PipelineResult) *schema.Ge
 		return nil
 	}
 	return result.Artifacts
+}
+
+func generationArtifactsFromBytes(raw []byte) *schema.GenerationArtifacts {
+	if len(raw) == 0 {
+		return nil
+	}
+	var artifacts schema.GenerationArtifacts
+	if err := json.Unmarshal(raw, &artifacts); err != nil {
+		return nil
+	}
+	return &artifacts
+}
+
+func generationArtifactsBytes(artifacts *schema.GenerationArtifacts) []byte {
+	if artifacts == nil {
+		return nil
+	}
+	raw, err := json.Marshal(artifacts)
+	if err != nil || len(raw) == 0 {
+		return nil
+	}
+	return raw
+}
+
+func generationJobToDTO(job repo.GenerationJob) generationJobDTO {
+	return generationJobDTO{ID: job.ID, ProjectID: job.ProjectID, Status: job.Status, Progress: int(job.Progress), CurrentStep: job.CurrentStep, ErrorMessage: textPtr(job.ErrorMessage), Artifacts: generationArtifactsFromBytes(job.Artifacts), StartedAt: timestamp(job.StartedAt), CompletedAt: timestamp(job.CompletedAt), CreatedAt: timestamp(job.CreatedAt), UpdatedAt: timestamp(job.UpdatedAt)}
 }
 
 func sceneToDTO(s sqlc.Scene, includeRaw bool) sceneDTO {

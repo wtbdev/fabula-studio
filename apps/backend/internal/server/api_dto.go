@@ -96,10 +96,11 @@ type loginRequest struct {
 }
 
 type createProjectRequest struct {
-	Title      string      `json:"title"`
-	NovelTitle string      `json:"novelTitle"`
-	SourceText string      `json:"sourceText"`
-	Config     adaptConfig `json:"config"`
+	Title             string                    `json:"title"`
+	NovelTitle        string                    `json:"novelTitle"`
+	SourceText        string                    `json:"sourceText"`
+	Config            adaptConfig               `json:"config"`
+	AdaptationProfile *schema.AdaptationProfile `json:"adaptationProfile,omitempty"`
 }
 
 type updateProjectRequest struct {
@@ -117,17 +118,41 @@ type updateSceneRequest struct {
 
 type generationResponse struct {
 	ProjectID       string                      `json:"projectId"`
+	JobID           string                      `json:"jobId,omitempty"`
 	Status          string                      `json:"status"`
+	Progress        int                         `json:"progress"`
+	CurrentStep     string                      `json:"currentStep"`
 	CostPoints      int32                       `json:"costPoints"`
 	RemainingPoints int32                       `json:"remainingPoints"`
 	Scenes          []sceneDTO                  `json:"scenes"`
 	Artifacts       *schema.GenerationArtifacts `json:"artifacts,omitempty"`
+	Job             *generationJobDTO           `json:"job,omitempty"`
 }
 
 type generationStatusDTO struct {
-	ProjectID   string                      `json:"projectId"`
-	Status      string                      `json:"status"`
-	Progress    int                         `json:"progress"`
-	CurrentStep string                      `json:"currentStep"`
-	Artifacts   *schema.GenerationArtifacts `json:"artifacts,omitempty"`
+	ProjectID     string                      `json:"projectId"`
+	JobID         string                      `json:"jobId,omitempty"`
+	ProjectStatus string                      `json:"projectStatus"`
+	Status        string                      `json:"status"`
+	Progress      int                         `json:"progress"`
+	CurrentStep   string                      `json:"currentStep"`
+	ErrorMessage  *string                     `json:"errorMessage,omitempty"`
+	Artifacts     *schema.GenerationArtifacts `json:"artifacts,omitempty"`
+	Project       *projectDTO                 `json:"project,omitempty"`
+	Scenes        []sceneDTO                  `json:"scenes,omitempty"`
+	Job           *generationJobDTO           `json:"job,omitempty"`
+}
+
+type generationJobDTO struct {
+	ID           string                      `json:"id"`
+	ProjectID    string                      `json:"projectId"`
+	Status       string                      `json:"status"`
+	Progress     int                         `json:"progress"`
+	CurrentStep  string                      `json:"currentStep"`
+	ErrorMessage *string                     `json:"errorMessage,omitempty"`
+	Artifacts    *schema.GenerationArtifacts `json:"artifacts,omitempty"`
+	StartedAt    string                      `json:"startedAt,omitempty"`
+	CompletedAt  string                      `json:"completedAt,omitempty"`
+	CreatedAt    string                      `json:"createdAt"`
+	UpdatedAt    string                      `json:"updatedAt"`
 }

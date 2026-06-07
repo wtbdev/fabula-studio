@@ -9,11 +9,12 @@ import (
 )
 
 type Store struct {
-	Pool     *pgxpool.Pool
-	Queries  *sqlc.Queries
-	Users    *UserRepo
-	Projects *ProjectRepo
-	Scenes   *SceneRepo
+	Pool           *pgxpool.Pool
+	Queries        *sqlc.Queries
+	Users          *UserRepo
+	Projects       *ProjectRepo
+	Scenes         *SceneRepo
+	GenerationJobs *GenerationJobRepo
 }
 
 func NewStore(pool *pgxpool.Pool) *Store {
@@ -22,6 +23,7 @@ func NewStore(pool *pgxpool.Pool) *Store {
 	store.Users = &UserRepo{q: queries}
 	store.Projects = &ProjectRepo{q: queries}
 	store.Scenes = &SceneRepo{q: queries}
+	store.GenerationJobs = &GenerationJobRepo{db: pool}
 	return store
 }
 
