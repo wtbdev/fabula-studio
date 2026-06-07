@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"strings"
 	"time"
@@ -191,8 +192,9 @@ func (g *GenerationService) commitGenerationResult(ctx context.Context, jobID, p
 		if err := q.DeleteScenesByProjectID(ctx, projectID); err != nil {
 			return err
 		}
+		sourceMap := buildSceneSourceMap(artifacts)
 		for _, scene := range sp.Scenes {
-			if _, err := q.CreateScene(ctx, screenplaySceneToCreate(projectID, scene)); err != nil {
+			if _, err := q.CreateScene(ctx, screenplaySceneToCreate(projectID, scene, sourceMap[scene.Sequence])); err != nil {
 				return err
 			}
 		}
@@ -220,4 +222,56 @@ func (g *GenerationService) failGenerationJob(ctx context.Context, jobID, projec
 
 func (g *GenerationService) markGenerationFailed(ctx context.Context, projectID, userID, msg string) {
 	_, _ = g.store.Queries.UpdateProjectStatus(ctx, sqlc.UpdateProjectStatusParams{ID: projectID, UserID: userID, Status: "failed", ErrorMessage: textValue(msg)})
+}
+
+// buildSceneSourceMap builds a per-scene source evidence map from generation
+// artifacts. Each scene gets its chapter references and summary from the
+// ScenePlan's source refs and the SourceIndex's sentence data.
+func buildSceneSourceMap(artifacts *schema.GenerationArtifacts) map[int]*SceneSourceInfo {
+	if artifacts == nil || artifacts.ScenePlan == nil || artifacts.SourceIndex == nil {
+		return nil
+	}
+
+	// index sentences by ID for fast lookup
+	sentenceByID := make(map[string]schema.SourceSentence, len(artifacts.SourceIndex.Sentences))
+	for _, s := range artifacts.SourceIndex.Sentences {
+		sentenceByID[s.ID] = s
+	}
+
+	// collect chapter names from a plan's source refs
+	collectChapters := func(refs []schema.SourceSentenceRef) []string {
+		seen := make(map[int]bool)
+		var chapters []string
+		for _, ref := range refs {
+			s, ok := sentenceByID[ref.SentenceID]
+			if !ok || seen[s.Chapter] {
+				continue
+			}
+			seen[s.Chapter] = true
+			chapters = append(chapters, fmt.Sprintf("第%d章", s.Chapter))
+		}
+		return chapters
+	}
+
+	plans := artifacts.ScenePlan.Scenes
+	if len(plans) == 0 {
+		// single-level plan without nested scenes
+		if chapters := collectChapters(artifacts.ScenePlan.SourceRefs); len(chapters) > 0 {
+			return map[int]*SceneSourceInfo{
+				artifacts.ScenePlan.Sequence: {Chapters: chapters, Summary: artifacts.ScenePlan.Purpose},
+			}
+		}
+		return nil
+	}
+
+	result := make(map[int]*SceneSourceInfo, len(plans))
+	for _, plan := range plans {
+		chapters := collectChapters(plan.SourceRefs)
+		if len(chapters) == 0 && plan.Purpose == "" {
+			continue
+		}
+		info := &SceneSourceInfo{Chapters: chapters, Summary: plan.Purpose}
+		result[plan.Sequence] = info
+	}
+	return result
 }

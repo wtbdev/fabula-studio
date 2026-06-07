@@ -13,7 +13,6 @@ import {
   FileText,
   FileType,
   GitBranch,
-  Lightbulb,
   MapPin,
   RefreshCw,
   Save,
@@ -29,12 +28,11 @@ import { useAuth } from '../composables/useAuth'
 import type { GenerationArtifacts, GenerateStatusDTO, PipelineEventDTO, ProjectDTO, SceneDTO } from '../api/types'
 import SceneList from '../components/SceneList.vue'
 import ScriptEditor from '../components/ScriptEditor.vue'
-import AiSuggestionPanel from '../components/editor/AiSuggestionPanel.vue'
 import SceneRegenerateModal from '../components/editor/SceneRegenerateModal.vue'
 
 type SaveStatus = 'saved' | 'dirty' | 'saving' | 'failed'
 type WorkbenchMode = 'script' | 'settings'
-type ExtensionTab = 'info' | 'source' | 'suggestions' | 'artifacts'
+type ExtensionTab = 'info' | 'source' | 'artifacts'
 
 type EventDetails = Record<string, unknown>
 type RealtimePlan = {
@@ -989,11 +987,6 @@ const handleAccount = async () => {
   await router.push('/account')
 }
 
-const handleSuggestionAiPointsChange = (remainingPoints: number) => {
-  if (authState.user) {
-    authState.user.aiPoints = remainingPoints
-  }
-}
 
 
 onMounted(async () => {
@@ -1288,14 +1281,6 @@ watch(
             </button>
             <button
               type="button"
-              :class="{ active: extensionTab === 'suggestions' }"
-              @click="extensionTab = 'suggestions'"
-            >
-              <n-icon><Lightbulb /></n-icon>
-              AI 建议
-            </button>
-            <button
-              type="button"
               :class="{ active: extensionTab === 'artifacts' }"
               @click="extensionTab = 'artifacts'"
             >
@@ -1582,15 +1567,6 @@ watch(
               <n-empty v-else description="当前生成接口尚未返回结构化产物。" />
             </section>
 
-            <AiSuggestionPanel
-              v-else-if="activeScene"
-              :project-id="project?.id ?? null"
-              :scene-id="activeScene.id"
-              :scene-title="activeScene.title"
-              :scene-content="editorContent"
-              :disabled="isWorkbenchLocked"
-              @refresh-user="handleSuggestionAiPointsChange"
-            />
           </div>
 
           <n-empty v-else description="暂无选中场次" class="extension-empty" />
@@ -1660,7 +1636,6 @@ watch(
       :disabled="isWorkbenchLocked && !applyingRegeneratedScene"
       :applying="applyingRegeneratedScene"
       @apply="handleSceneRegenerateApply"
-      @refresh-user="handleSuggestionAiPointsChange"
     />
   </n-spin>
 </template>

@@ -352,8 +352,12 @@ func (s *Server) handleGenerate(w http.ResponseWriter, r *http.Request, userID, 
 	writeAPISuccessStatus(w, http.StatusAccepted, message, response)
 }
 
-func screenplaySceneToCreate(projectID string, scene schema.Scene) sqlc.CreateSceneParams {
-	raw, _ := json.Marshal(sceneRawJSON{Characters: scene.CharactersPresent, Script: screenplayBlocks(scene.Content)})
+func screenplaySceneToCreate(projectID string, scene schema.Scene, sourceInfo *SceneSourceInfo) sqlc.CreateSceneParams {
+	rawJSON := sceneRawJSON{Characters: scene.CharactersPresent, Script: screenplayBlocks(scene.Content)}
+	if sourceInfo != nil {
+		rawJSON.Source = sourceInfo
+	}
+	raw, _ := json.Marshal(rawJSON)
 	return sqlc.CreateSceneParams{ID: uuid.NewString(), ProjectID: projectID, SceneNo: int32(scene.Sequence), Title: scene.Heading, Location: textValue(scene.Setting.Location), TimeText: textValue(scene.Setting.Time), Summary: textValue(scene.Synopsis), Content: sceneContent(scene), RawJson: textValue(string(raw))}
 }
 

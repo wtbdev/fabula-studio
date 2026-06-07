@@ -3,14 +3,6 @@ import type { PageParams } from './request'
 export type ProjectStatus = 'draft' | 'generating' | 'completed' | 'failed'
 export type GenerationJobStatus = 'queued' | 'running' | 'completed' | 'failed'
 export type GenerateStatus = ProjectStatus | GenerationJobStatus
-export type SceneSuggestionType =
-  | 'dialogue'
-  | 'conflict'
-  | 'rhythm'
-  | 'character'
-  | 'structure'
-  | 'visual'
-export type SceneSuggestionStatus = 'pending' | 'accepted' | 'dismissed'
 
 export type AdaptStyle = '影视剧' | '短剧' | '舞台剧' | '广播剧' | (string & {})
 export type DialogueLevel = '简略' | '适中' | '详细'
@@ -265,42 +257,3 @@ export interface GenerateSceneRegenerationResponse {
   remainingPoints: number
 }
 
-export interface SceneSuggestion {
-  id: string
-  projectId: string
-  sceneId: string
-  type: SceneSuggestionType
-  title: string
-  problem: string
-  reason: string
-  suggestion: string
-  applyText?: string
-  status: SceneSuggestionStatus
-  createdAt: string
-  updatedAt: string
-}
-
-export interface SceneSuggestionListParams {
-  status?: SceneSuggestionStatus | 'all'
-}
-
-export interface GenerateSceneSuggestionsRequest {
-  content: string
-  count?: number
-}
-
-export interface GenerateSceneSuggestionsResponse {
-  costPoints: number
-  remainingPoints: number
-  suggestions: SceneSuggestion[]
-}
-
-export interface UpdateSceneSuggestionRequest {
-  status: Exclude<SceneSuggestionStatus, 'pending'>
-}
-
-export interface UpdateSceneSuggestionResponse {
-  id: string
-  status: Exclude<SceneSuggestionStatus, 'pending'>
-  updatedAt: string
-}

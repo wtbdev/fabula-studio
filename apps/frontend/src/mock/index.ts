@@ -9,8 +9,6 @@ import type {
   CreateProjectRequest,
   GenerateSceneRegenerationRequest,
   GenerateSceneRegenerationResponse,
-  GenerateSceneSuggestionsRequest,
-  GenerateSceneSuggestionsResponse,
   GenerateProjectResponse,
   GenerationJobDTO,
   GenerateStatusDTO,
@@ -19,13 +17,9 @@ import type {
   RegisterRequest,
   SceneDTO,
   SceneRegenerationMode,
-  SceneSuggestion,
-  SceneSuggestionStatus,
   UpdateProjectRequest,
   UpdateSceneRequest,
   UpdateSceneResponse,
-  UpdateSceneSuggestionRequest,
-  UpdateSceneSuggestionResponse,
   UserDTO,
 } from '../api'
 
@@ -443,7 +437,6 @@ const getActiveGenerationJob = (projectId: string) => {
   return job && (job.status === 'queued' || job.status === 'running') ? job : null
 }
 
-let sceneSuggestions: SceneSuggestion[] = []
 
 const readSessionUser = () => {
   const token = localStorage.getItem(authTokenStorageKey)
@@ -640,82 +633,6 @@ const createIncrementalMockScenes = (projectId: string, projectScenes: SceneDTO[
 
   return [...updatedScenes, incrementalScene]
 }
-
-const suggestionTemplates = [
-  {
-    type: 'conflict',
-    title: '把隐藏矛盾提前露出一点',
-    problem: '当前场次的推进比较顺，角色之间缺少阻力。',
-    reason: '观众需要在场景内感到某个秘密正在被靠近，否则这一场容易只承担信息交代。',
-    suggestion: '在关键对白前加入一句试探，让对方主动回避或反问，把关系压力显出来。',
-    applyText: '周砚：你一直不问那封信是谁送来的，是已经知道答案了吗？',
-  },
-  {
-    type: 'dialogue',
-    title: '让对白更像人物在互相试探',
-    problem: '对白目前偏直给，人物意图暴露得比较快。',
-    reason: '悬疑向场景更适合让角色绕开真实目的，通过短句、停顿和反问制造张力。',
-    suggestion: '保留信息点，但把陈述句改成带潜台词的问句或半句。',
-    applyText: '林晚：你等的不是我，是我手里的东西，对吗？',
-  },
-  {
-    type: 'rhythm',
-    title: '在信息揭示前增加一个动作停顿',
-    problem: '线索揭示来得太快，缺少悬念被拉开的瞬间。',
-    reason: '动作停顿可以让观众先观察人物反应，再接受关键信息，节奏会更有层次。',
-    suggestion: '在揭示信件、船票或旧照片前加入一个具体动作，让角色犹豫半拍。',
-    applyText: '动作：林晚伸手去拿信，指尖停在信封边缘，像是怕碰醒什么旧事。',
-  },
-  {
-    type: 'character',
-    title: '补足主角的主动选择',
-    problem: '当前场次里主角更多是在接收信息。',
-    reason: '主角如果在本场做出一个小选择，后续行动会更有因果感。',
-    suggestion: '让主角主动提出下一步调查方向，而不是只被线索牵着走。',
-    applyText: '林晚：明天一早去码头。我想看看父亲最后站过的地方。',
-  },
-  {
-    type: 'visual',
-    title: '增加一个可拍出来的视觉钩子',
-    problem: '场景氛围主要依赖文字说明，画面记忆点还不够明确。',
-    reason: '剧本场次需要给导演和演员一个可执行的视觉抓手。',
-    suggestion: '加入一个贯穿场景的小物件，例如湿信封、旧船票、暗房照片或灯箱。',
-    applyText: '动作：雨水从信封角落渗开，露出一枚几乎褪色的码头印章。',
-  },
-] satisfies Array<Omit<SceneSuggestion, 'id' | 'projectId' | 'sceneId' | 'status' | 'createdAt' | 'updatedAt'>>
-
-const normalizeSuggestionCount = (count?: number) => {
-  if (typeof count !== 'number' || !Number.isFinite(count)) return 3
-  return Math.min(Math.max(Math.floor(count), 1), 5)
-}
-
-const createMockSuggestions = (scene: SceneDTO, content: string, count?: number) => {
-  const createdAt = now()
-  const suggestionCount = normalizeSuggestionCount(count)
-  const sceneCharacters = collectSceneCharacters([scene])
-  const primaryCharacter = sceneCharacters[0] ?? '主角'
-  const secondaryCharacter = sceneCharacters[1] ?? '对手角色'
-
-  return suggestionTemplates.slice(0, suggestionCount).map((template, index) => {
-    const contentHint = content.includes('？') || content.includes('?') ? '疑问句已经存在' : '当前对白较少使用反问'
-    const suggestion = {
-      ...template,
-      id: createId('suggestion'),
-      projectId: scene.projectId,
-      sceneId: scene.id,
-      title: index === 0 ? `${template.title}：${scene.title}` : template.title,
-
-      reason:
-        index === 1
-          ? `${template.reason}（mock 分析：${contentHint}，可继续强化 ${primaryCharacter} 与 ${secondaryCharacter} 的试探。）`
-          : template.reason,
-      status: 'pending',
-      createdAt,
-      updatedAt: createdAt,
-    } satisfies SceneSuggestion
-
-    return suggestion
-  })
 }
 
 const createMockGenerationArtifacts = (project: ProjectDTO, generatedScenes: SceneDTO[]): GenerationArtifacts => ({
@@ -1110,12 +1027,9 @@ Mock.mock(/\/api\/projects\/[^/?]+$/, 'delete', (options: MockRequestOptions) =>
   if (projectIndex < 0) {
     return fail(40401, '项目不存在')
   }
-
-  clearGenerationTimers(projectId)
   generationJobs.delete(projectId)
   projects.splice(projectIndex, 1)
   scenes = scenes.filter((scene) => scene.projectId !== projectId)
-  sceneSuggestions = sceneSuggestions.filter((suggestion) => suggestion.projectId !== projectId)
 
   return ok(true, '项目删除成功')
 })
@@ -1199,74 +1113,10 @@ Mock.mock(/\/api\/projects\/[^/?]+\/scenes(?:\?.*)?$/, 'get', (options: MockRequ
   if (!project) {
     return fail(40401, '项目不存在')
   }
-
   return ok(
     scenes
       .filter((scene) => scene.projectId === projectId)
       .sort((previous, next) => previous.sceneNo - next.sceneNo),
-  )
-})
-
-Mock.mock(/\/api\/scenes\/[^/?]+\/suggestions(?:\?.*)?$/, 'get', (options: MockRequestOptions) => {
-  const auth = requireAuth()
-  if ('response' in auth) return auth.response
-
-  const sceneId = getPathSegment(options, 2)
-  const scene = getSceneForCurrentUser(sceneId)
-
-  if (!scene) {
-    return fail(40401, '场次不存在')
-  }
-
-  const status =
-    (toUrl(options.url).searchParams.get('status') as SceneSuggestionStatus | 'all' | null) ??
-    'pending'
-  const suggestions = sceneSuggestions
-    .filter((suggestion) => suggestion.sceneId === sceneId)
-    .filter((suggestion) => status === 'all' || suggestion.status === status)
-    .sort((previous, next) => Date.parse(next.createdAt) - Date.parse(previous.createdAt))
-
-  return ok(suggestions)
-})
-
-Mock.mock(/\/api\/scenes\/[^/?]+\/suggestions$/, 'post', (options: MockRequestOptions) => {
-  const auth = requireAuth()
-  if ('response' in auth) return auth.response
-
-  const sceneId = getPathSegment(options, 2)
-  const scene = getSceneForCurrentUser(sceneId)
-
-  if (!scene) {
-    return fail(40401, '场次不存在')
-  }
-
-  const payload = parseBody<GenerateSceneSuggestionsRequest>(options)
-  const content = payload.content?.trim()
-
-  if (!content) {
-    return fail(40901, '当前场次内容为空')
-  }
-
-  if (auth.user.aiPoints < 30) {
-    return fail(40201, 'AI 点数不足，无法生成建议')
-  }
-
-  auth.user.aiPoints -= 30
-  auth.user.updatedAt = now()
-
-  sceneSuggestions = sceneSuggestions.filter(
-    (suggestion) => !(suggestion.sceneId === sceneId && suggestion.status === 'pending'),
-  )
-  const suggestions = createMockSuggestions(scene, content, payload.count)
-  sceneSuggestions.push(...suggestions)
-
-  return ok<GenerateSceneSuggestionsResponse>(
-    {
-      costPoints: 30,
-      remainingPoints: auth.user.aiPoints,
-      suggestions,
-    },
-    'AI 建议生成成功',
   )
 })
 
@@ -1358,32 +1208,4 @@ Mock.mock(/\/api\/scenes\/[^/?]+$/, 'patch', (options: MockRequestOptions) => {
   )
 })
 
-Mock.mock(/\/api\/suggestions\/[^/?]+$/, 'patch', (options: MockRequestOptions) => {
-  const auth = requireAuth()
-  if ('response' in auth) return auth.response
-
-  const suggestionId = getPathSegment(options, 2)
-  const suggestion = sceneSuggestions.find((item) => item.id === suggestionId)
-
-  if (!suggestion || !getProjectForCurrentUser(suggestion.projectId)) {
-    return fail(40401, '建议不存在')
-  }
-
-  const payload = parseBody<UpdateSceneSuggestionRequest>(options)
-
-  if (payload.status !== 'accepted' && payload.status !== 'dismissed') {
-    return fail(40002, '参数校验失败')
-  }
-
-  suggestion.status = payload.status
-  suggestion.updatedAt = now()
-
-  return ok<UpdateSceneSuggestionResponse>(
-    {
-      id: suggestion.id,
-      status: suggestion.status,
-      updatedAt: suggestion.updatedAt,
-    },
-    '建议状态已更新',
-  )
 })

@@ -70,6 +70,13 @@ type sceneRawJSON struct {
 	Source     any           `json:"source,omitempty"`
 }
 
+// SceneSourceInfo carries source evidence derived from generation artifacts
+// and persisted into each scene's rawJson.source.
+type SceneSourceInfo struct {
+	Chapters []string `json:"chapters,omitempty"`
+	Summary  string   `json:"summary,omitempty"`
+}
+
 type sceneDTO struct {
 	ID        string           `json:"id"`
 	ProjectID string           `json:"projectId"`
