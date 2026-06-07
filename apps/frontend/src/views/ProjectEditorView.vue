@@ -50,6 +50,14 @@ type RealtimePlan = {
   location?: string
   sourceNodeIds: string[]
 }
+type RealtimeCharacter = {
+  name: string
+  source: string
+}
+type RealtimeRelation = {
+  id: string
+  label: string
+}
 type RealtimeSceneHeading = {
   id: string
   heading: string
@@ -82,12 +90,15 @@ const exportLoading = ref(false)
 const sceneRegenerateVisible = ref(false)
 const applyingRegeneratedScene = ref(false)
 const realtimeEvents = ref<PipelineEventDTO[]>([])
+const realtimeCharacters = ref<RealtimeCharacter[]>([])
+const realtimeRelations = ref<RealtimeRelation[]>([])
 const realtimeTreeUnits = ref<RealtimeTreeUnit[]>([])
 const realtimePlans = ref<RealtimePlan[]>([])
 const realtimeSceneHeadings = ref<RealtimeSceneHeading[]>([])
 const realtimeTraceId = ref<string | null>(null)
 const realtimeRunId = ref<string | null>(null)
 const realtimeProgress = ref<number | null>(null)
+const seenRealtimeEventKeys = ref<Set<string>>(new Set())
 const realtimeCurrentStep = ref<string | null>(null)
 const pendingGenerationJobId = ref<string | null>(null)
 let generationPollingTimer: number | null = null
@@ -157,6 +168,7 @@ const projectStatusMeta = computed(() => {
 const isWorkbenchLocked = computed(
   () => generating.value || applyingRegeneratedScene.value || project.value?.status === 'generating',
 )
+const isNavigationLocked = computed(() => applyingRegeneratedScene.value)
 
 const hasSceneMetaChanged = computed(() => {
   if (!activeScene.value) return false
@@ -238,13 +250,38 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const toStringArray = (value: unknown) =>
   Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
 
+
+const mergeUniqueStrings = (current: string[], incoming: string[]) =>
+  Array.from(new Set([...current, ...incoming].map((item) => item.trim()).filter(Boolean)))
+
+const upsertRealtimeCharacters = (names: string[], source: string) => {
+  const seen = new Set(realtimeCharacters.value.map((character) => character.name))
+  const additions = names
+    .map((name) => name.trim())
+    .filter((name) => name && !seen.has(name))
+    .map((name) => ({ name, source }))
+
+  if (additions.length) realtimeCharacters.value = [...realtimeCharacters.value, ...additions]
+}
+
+const upsertRealtimeRelations = (labels: string[]) => {
+  const seen = new Set(realtimeRelations.value.map((relation) => relation.label))
+  const additions = labels
+    .map((label) => label.trim())
+    .filter((label) => label && !seen.has(label))
+    .map((label) => ({ id: label, label }))
+
+  if (additions.length) realtimeRelations.value = [...realtimeRelations.value, ...additions]
+}
 const getString = (record: Record<string, unknown>, key: string) => {
   const value = record[key]
   return typeof value === 'string' ? value : ''
 }
-
 const resetRealtimeGeneration = () => {
+  seenRealtimeEventKeys.value = new Set()
   realtimeEvents.value = []
+  realtimeCharacters.value = []
+  realtimeRelations.value = []
   realtimeTreeUnits.value = []
   realtimePlans.value = []
   realtimeSceneHeadings.value = []
@@ -295,13 +332,18 @@ const collectRealtimePlans = (details: EventDetails) => {
     const id = getString(plan, 'id') || `plan-${index + 1}`
     const sceneCount = typeof plan.scene_count === 'number' ? plan.scene_count : undefined
 
+    const sourceNodeIds = mergeUniqueStrings(
+      toStringArray(plan.source_candidate_ids),
+      toStringArray(plan.source_node_ids),
+    )
+
     return [
       {
         id,
         title: sceneCount ? `${id} · ${sceneCount} 场` : id,
         purpose: getString(plan, 'purpose') || '该场景计划未提供目的说明。',
         location: getString(plan, 'location') || undefined,
-        sourceNodeIds: toStringArray(plan.source_node_ids),
+        sourceNodeIds,
       },
     ]
   })
@@ -320,11 +362,36 @@ const collectRealtimeSceneHeadings = (details: EventDetails) => {
   })
 }
 
+const realtimeEventKey = (event: PipelineEventDTO) =>
+  [
+    event.runId ?? '',
+    event.jobId ?? '',
+    event.timestamp ?? '',
+    event.type,
+    event.step ?? '',
+    event.node_id ?? '',
+    event.message ?? '',
+    event.error ?? '',
+  ].join('|')
+
+const compareRealtimeEvents = (previous: PipelineEventDTO, next: PipelineEventDTO) => {
+  const previousTime = Date.parse(previous.timestamp ?? '')
+  const nextTime = Date.parse(next.timestamp ?? '')
+  if (Number.isFinite(nextTime) && Number.isFinite(previousTime) && nextTime !== previousTime) {
+    return nextTime - previousTime
+  }
+
+  return 0
+}
+
 const applyPipelineEvent = (event: PipelineEventDTO) => {
   if (!eventMatchesCurrentGeneration(event)) return
+  const key = realtimeEventKey(event)
+  if (seenRealtimeEventKeys.value.has(key)) return
+  seenRealtimeEventKeys.value = new Set([...seenRealtimeEventKeys.value, key])
   pendingGenerationJobId.value = event.jobId ?? pendingGenerationJobId.value
 
-  realtimeEvents.value = [event, ...realtimeEvents.value].slice(0, 30)
+  realtimeEvents.value = [event, ...realtimeEvents.value].sort(compareRealtimeEvents).slice(0, 30)
   realtimeTraceId.value = event.traceId ?? realtimeTraceId.value
   realtimeRunId.value = event.runId ?? realtimeRunId.value
   realtimeProgress.value = typeof event.progress === 'number' ? event.progress : realtimeProgress.value
@@ -332,7 +399,16 @@ const applyPipelineEvent = (event: PipelineEventDTO) => {
 
   const details = event.details ?? {}
   if (event.type === 'tree_snapshot') {
-    realtimeTreeUnits.value = collectRealtimeTreeUnits(details)
+    const units = collectRealtimeTreeUnits(details)
+    realtimeTreeUnits.value = units
+    upsertRealtimeCharacters(
+      units.flatMap((unit) => unit.characters),
+      '剧情单元',
+    )
+  }
+  if (event.type === 'graph_updated' || event.step === 'graph_update') {
+    upsertRealtimeCharacters(toStringArray(details.new_characters), '动态图谱')
+    upsertRealtimeRelations(toStringArray(details.new_relations))
   }
   if (event.type === 'scene_planned') {
     realtimePlans.value = collectRealtimePlans(details)
@@ -345,7 +421,10 @@ const applyPipelineEvent = (event: PipelineEventDTO) => {
 
 const getEventStreamURL = () => {
   const baseURL = (import.meta.env.VITE_API_BASE_URL ?? '/api').replace(/\/$/, '')
-  return `${baseURL}/events/stream`
+  const params = new URLSearchParams({ projectId: projectId.value })
+  const jobId = pendingGenerationJobId.value ?? currentGenerationJobId.value
+  if (jobId) params.set('jobId', jobId)
+  return `${baseURL}/events/stream?${params.toString()}`
 }
 
 const stopGenerationEvents = () => {
@@ -482,6 +561,8 @@ const sourceIndexChapterCount = computed(
 const storyBeatCount = computed(() => generationArtifacts.value?.storyBeats?.length ?? 0)
 const scenePlanCount = computed(() => generationArtifacts.value?.scenePlan?.length ?? 0)
 
+const realtimeCharacterCount = computed(() => realtimeCharacters.value.length)
+const realtimeRelationCount = computed(() => realtimeRelations.value.length)
 const realtimeTreeUnitCount = computed(() => realtimeTreeUnits.value.length)
 const realtimePlanCount = computed(() => realtimePlans.value.length)
 const realtimeSceneHeadingCount = computed(() => realtimeSceneHeadings.value.length)
@@ -489,6 +570,8 @@ const realtimeSceneHeadingCount = computed(() => realtimeSceneHeadings.value.len
 const hasRealtimeGenerationArtifacts = computed(
   () =>
     realtimeEvents.value.length > 0 ||
+    realtimeCharacterCount.value > 0 ||
+    realtimeRelationCount.value > 0 ||
     realtimeTreeUnitCount.value > 0 ||
     realtimePlanCount.value > 0 ||
     realtimeSceneHeadingCount.value > 0 ||
@@ -738,7 +821,7 @@ const handleSceneRegenerateApply = async (content: string) => {
 }
 
 const handleModeChange = async (mode: WorkbenchMode) => {
-  if (isWorkbenchLocked.value) return
+  if (isNavigationLocked.value) return
   if (mode === activeMode.value) return
 
   if (activeMode.value === 'script' && (saveStatus.value === 'dirty' || saveStatus.value === 'failed')) {
@@ -864,6 +947,7 @@ const handleGenerateProject = async () => {
     }
     applyGenerationArtifacts(result.artifacts ?? result.job?.artifacts)
     message.success('生成任务已启动')
+    stopGenerationEvents()
     startGenerationPolling()
   } catch (error) {
     if (project.value) {
@@ -881,7 +965,7 @@ const handleGenerateProject = async () => {
 }
 
 const handleExit = async () => {
-  if (isWorkbenchLocked.value) return
+  if (isNavigationLocked.value) return
 
   if (saveStatus.value === 'dirty' || saveStatus.value === 'failed') {
     const saved = await saveCurrentScene()
@@ -929,7 +1013,7 @@ const handleExportConfirm = async () => {
 }
 
 const handleAccount = async () => {
-  if (isWorkbenchLocked.value) return
+  if (isNavigationLocked.value) return
 
   if (saveStatus.value === 'dirty' || saveStatus.value === 'failed') {
     const saved = await saveCurrentScene()
@@ -944,6 +1028,7 @@ const handleSuggestionAiPointsChange = (remainingPoints: number) => {
     authState.user.aiPoints = remainingPoints
   }
 }
+
 
 onMounted(async () => {
   loading.value = true
@@ -991,7 +1076,7 @@ watch(
     <main class="workbench-page">
       <header class="workbench-topbar">
         <div class="workbench-topbar-left">
-          <n-button secondary size="small" :disabled="isWorkbenchLocked" @click="handleExit">
+          <n-button secondary size="small" :disabled="isNavigationLocked" @click="handleExit">
             <template #icon>
               <n-icon><ArrowLeft /></n-icon>
             </template>
@@ -1004,8 +1089,8 @@ watch(
               :key="mode.key"
               type="button"
               class="workbench-tab"
-              :class="{ active: activeMode === mode.key, disabled: isWorkbenchLocked }"
-              :disabled="isWorkbenchLocked"
+              :class="{ active: activeMode === mode.key, disabled: isNavigationLocked }"
+              :disabled="isNavigationLocked"
               @click="handleModeChange(mode.key)"
             >
               {{ mode.label }}
@@ -1068,7 +1153,7 @@ watch(
                 增量生成
               </n-button>
             </template>
-            将基于当前剧本继续生成场次并同步人物关系，期间编辑器会暂时锁定，消耗 300 AI 点数。
+            将基于当前剧本继续生成场次并同步人物关系，期间编辑器会暂时锁定，消耗 1 AI 点数。
           </n-popconfirm>
           <n-button size="small" type="primary" :disabled="isWorkbenchLocked" @click="handleExport">
             <template #icon>
@@ -1082,7 +1167,7 @@ watch(
             secondary
             size="small"
             aria-label="用户入口"
-            :disabled="isWorkbenchLocked"
+            :disabled="isNavigationLocked"
             @click="handleAccount"
           >
             <template #icon>
@@ -1185,7 +1270,7 @@ watch(
             <section class="settings-section danger">
               <div class="settings-section-title">
                 <h3>增量生成剧本</h3>
-                <n-tag :bordered="false" type="warning">消耗 300 点</n-tag>
+                <n-tag :bordered="false" type="warning">消耗 1 点</n-tag>
               </div>
               <p>该操作会调用现有生成接口，基于当前剧本继续补充场次，并同步人物关系等生成结果。</p>
               <n-popconfirm
@@ -1205,7 +1290,7 @@ watch(
                     增量生成
                   </n-button>
                 </template>
-                将基于当前剧本继续生成，并消耗 300 AI 点数。生成完成前编辑器会暂时锁定。
+                将基于当前剧本继续生成，并消耗 1 AI 点数。生成完成前编辑器会暂时锁定。
               </n-popconfirm>
             </section>
           </section>
@@ -1282,25 +1367,13 @@ watch(
                 <n-collapse-item title="编辑场次信息" name="scene-meta">
                   <n-form label-placement="top" class="scene-meta-form">
                     <n-form-item label="场次标题">
-                      <n-input
-                        v-model:value="sceneMetaForm.title"
-                        placeholder="输入场次标题"
-                        :disabled="isWorkbenchLocked"
-                      />
+                      <n-input v-model:value="sceneMetaForm.title" placeholder="输入场次标题" :disabled="isWorkbenchLocked" />
                     </n-form-item>
                     <n-form-item label="地点">
-                      <n-input
-                        v-model:value="sceneMetaForm.location"
-                        placeholder="输入地点"
-                        :disabled="isWorkbenchLocked"
-                      />
+                      <n-input v-model:value="sceneMetaForm.location" placeholder="输入地点" :disabled="isWorkbenchLocked" />
                     </n-form-item>
                     <n-form-item label="时间">
-                      <n-input
-                        v-model:value="sceneMetaForm.timeText"
-                        placeholder="输入时间"
-                        :disabled="isWorkbenchLocked"
-                      />
+                      <n-input v-model:value="sceneMetaForm.timeText" placeholder="输入时间" :disabled="isWorkbenchLocked" />
                     </n-form-item>
                     <n-form-item label="概要">
                       <n-input
@@ -1348,14 +1421,34 @@ watch(
               <h2>生成产物</h2>
 
               <div v-if="hasGenerationArtifacts" class="artifact-stack">
-                <section v-if="hasRealtimeGenerationArtifacts" class="artifact-section realtime">
+                <section v-if="hasRealtimeGenerationArtifacts" class="artifact-section realtime artifact-hero">
                   <div class="artifact-section-heading">
-                    <h3>实时生成</h3>
+                    <div>
+                      <h3>实时生成</h3>
+                      <p>{{ generationStepLabel }}</p>
+                    </div>
                     <n-tag size="small" :bordered="false" type="info">
                       {{ realtimeEvents.length }} 事件
                     </n-tag>
                   </div>
-                  <p>{{ generationStepLabel }}</p>
+                  <div class="artifact-metric-grid">
+                    <div>
+                      <span>角色</span>
+                      <strong>{{ realtimeCharacterCount }}</strong>
+                    </div>
+                    <div>
+                      <span>关系</span>
+                      <strong>{{ realtimeRelationCount }}</strong>
+                    </div>
+                    <div>
+                      <span>计划</span>
+                      <strong>{{ realtimePlanCount }}</strong>
+                    </div>
+                    <div>
+                      <span>场景</span>
+                      <strong>{{ realtimeSceneHeadingCount }}</strong>
+                    </div>
+                  </div>
                   <dl v-if="realtimeTraceId || realtimeRunId" class="config-grid artifact-graph-grid artifact-trace-grid">
                     <div v-if="realtimeTraceId">
                       <dt>Trace ID</dt>
@@ -1366,31 +1459,31 @@ watch(
                       <dd>{{ realtimeRunId }}</dd>
                     </div>
                   </dl>
-                  <ul v-if="realtimeEvents.length" class="artifact-event-list">
-                    <li v-for="event in realtimeEvents.slice(0, 8)" :key="`${event.timestamp}-${event.type}-${event.step ?? ''}`">
-                      <span>{{ formatEventTimestamp(event.timestamp) }}</span>
-                      <strong>{{ getEventLabel(event) }}</strong>
-                    </li>
-                  </ul>
                 </section>
 
-                <section v-if="realtimeTreeUnits.length" class="artifact-section">
+                <section v-if="realtimeCharacters.length" class="artifact-section artifact-section-compact">
                   <div class="artifact-section-heading">
-                    <h3>实时剧情单元</h3>
-                    <n-tag size="small" :bordered="false" type="success">{{ realtimeTreeUnitCount }} 个</n-tag>
+                    <h3>实时角色</h3>
+                    <n-tag size="small" :bordered="false" type="success">{{ realtimeCharacterCount }} 个</n-tag>
                   </div>
-                  <ol class="artifact-list">
-                    <li v-for="unit in realtimeTreeUnits" :key="unit.id">
-                      <strong>{{ unit.title }}</strong>
-                      <p>{{ unit.meta }}</p>
-                      <p>{{ unit.summary }}</p>
-                      <n-space v-if="unit.characters.length" size="small">
-                        <n-tag v-for="character in unit.characters" :key="character" size="small" :bordered="false">
-                          {{ character }}
-                        </n-tag>
-                      </n-space>
-                    </li>
-                  </ol>
+                  <div class="artifact-chip-cloud">
+                    <span v-for="character in realtimeCharacters" :key="character.name" class="artifact-chip">
+                      <strong>{{ character.name }}</strong>
+                      <small>{{ character.source }}</small>
+                    </span>
+                  </div>
+                </section>
+
+                <section v-if="realtimeRelations.length" class="artifact-section artifact-section-compact">
+                  <div class="artifact-section-heading">
+                    <h3>实时关系</h3>
+                    <n-tag size="small" :bordered="false" type="info">{{ realtimeRelationCount }} 条</n-tag>
+                  </div>
+                  <div class="artifact-chip-cloud relation-cloud">
+                    <span v-for="relation in realtimeRelations" :key="relation.id" class="artifact-chip relation-chip">
+                      {{ relation.label }}
+                    </span>
+                  </div>
                 </section>
 
                 <section v-if="realtimePlans.length" class="artifact-section">
@@ -1398,26 +1491,53 @@ watch(
                     <h3>实时场景规划</h3>
                     <n-tag size="small" :bordered="false" type="warning">{{ realtimePlanCount }} 场</n-tag>
                   </div>
-                  <ol class="artifact-list">
+                  <ol class="artifact-timeline">
                     <li v-for="plan in realtimePlans" :key="plan.id">
-                      <strong>{{ plan.title }}</strong>
-                      <p>{{ plan.purpose }}</p>
-                      <p v-if="plan.location">地点：{{ plan.location }}</p>
-                      <p v-if="plan.sourceNodeIds.length">来源：{{ plan.sourceNodeIds.join('、') }}</p>
+                      <div>
+                        <strong>{{ plan.title }}</strong>
+                        <p>{{ plan.purpose }}</p>
+                        <span v-if="plan.location">{{ plan.location }}</span>
+                      </div>
                     </li>
                   </ol>
                 </section>
 
-                <section v-if="realtimeSceneHeadings.length" class="artifact-section">
+                <section v-if="realtimeSceneHeadings.length" class="artifact-section artifact-section-compact">
                   <div class="artifact-section-heading">
                     <h3>实时场景标题</h3>
                     <n-tag size="small" :bordered="false" type="success">{{ realtimeSceneHeadingCount }} 场</n-tag>
                   </div>
-                  <ol class="artifact-list">
+                  <ol class="artifact-list compact-list">
                     <li v-for="scene in realtimeSceneHeadings" :key="scene.id">
                       <strong>{{ scene.heading }}</strong>
                     </li>
                   </ol>
+                </section>
+
+                <section v-if="realtimeTreeUnits.length" class="artifact-section subtle-section">
+                  <div class="artifact-section-heading">
+                    <h3>剧情单元</h3>
+                    <n-tag size="small" :bordered="false" type="success">{{ realtimeTreeUnitCount }} 个</n-tag>
+                  </div>
+                  <ol class="artifact-list compact-list">
+                    <li v-for="unit in realtimeTreeUnits.slice(0, 6)" :key="unit.id">
+                      <strong>{{ unit.title }}</strong>
+                      <p>{{ unit.summary }}</p>
+                    </li>
+                  </ol>
+                </section>
+
+                <section v-if="realtimeEvents.length" class="artifact-section subtle-section">
+                  <div class="artifact-section-heading">
+                    <h3>事件流</h3>
+                    <n-tag size="small" :bordered="false">最近 8 条</n-tag>
+                  </div>
+                  <ul class="artifact-event-list">
+                    <li v-for="event in realtimeEvents.slice(0, 8)" :key="`${event.timestamp}-${event.type}-${event.step ?? ''}`">
+                      <span>{{ formatEventTimestamp(event.timestamp) }}</span>
+                      <strong>{{ getEventLabel(event) }}</strong>
+                    </li>
+                  </ul>
                 </section>
 
                 <section v-if="generationArtifacts?.sourceIndex" class="artifact-section">
@@ -1445,7 +1565,7 @@ watch(
                     <h3>故事节拍</h3>
                     <n-tag size="small" :bordered="false" type="success">{{ storyBeatCount }} 条</n-tag>
                   </div>
-                  <ol class="artifact-list">
+                  <ol class="artifact-list compact-list">
                     <li v-for="beat in generationArtifacts.storyBeats" :key="beat.id">
                       <strong>{{ beat.title || `节拍 ${beat.order ?? beat.id}` }}</strong>
                       <p>{{ beat.summary }}</p>
@@ -1458,7 +1578,7 @@ watch(
                     <h3>场景规划</h3>
                     <n-tag size="small" :bordered="false" type="warning">{{ scenePlanCount }} 场</n-tag>
                   </div>
-                  <ol class="artifact-list">
+                  <ol class="artifact-list compact-list">
                     <li v-for="plan in generationArtifacts.scenePlan" :key="plan.id">
                       <strong>{{ plan.title || `场景 ${plan.sceneNo ?? plan.id}` }}</strong>
                       <p>{{ plan.purpose || '该场景计划未提供目的说明。' }}</p>
@@ -1864,6 +1984,10 @@ watch(
   padding: 18px;
 }
 
+.artifact-card {
+  padding: 16px;
+}
+
 .extension-icon {
   display: grid;
   width: 42px;
@@ -1897,15 +2021,20 @@ watch(
 
 .artifact-stack {
   display: grid;
-  gap: 12px;
-  margin-top: 16px;
+  gap: 10px;
+  margin-top: 14px;
 }
 
 .artifact-section {
+  padding: 14px;
+  overflow: hidden;
+  border: 1px solid rgba(220, 227, 223, 0.9);
+  border-radius: 12px;
+  background: rgba(255, 253, 248, 0.82);
+}
+
+.artifact-section-compact {
   padding: 12px;
-  border: 1px solid var(--color-line);
-  border-radius: 8px;
-  background: rgba(255, 253, 248, 0.72);
 }
 
 .artifact-section.warning {
@@ -1913,53 +2042,147 @@ watch(
   background: rgba(141, 73, 56, 0.06);
 }
 
+.subtle-section {
+  background: rgba(250, 251, 249, 0.74);
+}
+
 .artifact-section.realtime {
-  border-color: rgba(98, 130, 111, 0.32);
-  background: rgba(98, 130, 111, 0.08);
+  border-color: rgba(98, 130, 111, 0.34);
+  background:
+    radial-gradient(circle at top right, rgba(98, 130, 111, 0.14), transparent 42%),
+    rgba(98, 130, 111, 0.08);
+}
+
+.artifact-hero .artifact-section-heading {
+  align-items: flex-start;
+}
+
+.artifact-hero .artifact-section-heading p {
+  margin: 4px 0 0;
+  color: var(--color-sage);
+  font-weight: 700;
+  line-height: 1.5;
 }
 
 .artifact-section-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 8px;
+  gap: 10px;
+  margin-bottom: 10px;
 }
 
 .artifact-section-heading h3 {
   margin: 0;
   color: var(--color-ink);
   font-size: 14px;
+  font-weight: 800;
+}
+
+.artifact-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.artifact-metric-grid div {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid rgba(98, 130, 111, 0.16);
+  border-radius: 10px;
+  background: rgba(255, 253, 248, 0.7);
+}
+
+.artifact-metric-grid span,
+.artifact-chip small,
+.artifact-timeline span {
+  display: block;
+  color: var(--color-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.artifact-metric-grid strong {
+  display: block;
+  margin-top: 3px;
+  color: var(--color-ink);
+  font-family: var(--font-display);
+  font-size: 20px;
+  line-height: 1;
+}
+
+.artifact-chip-cloud {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.artifact-chip {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: baseline;
+  gap: 6px;
+  padding: 6px 9px;
+  border: 1px solid rgba(98, 130, 111, 0.18);
+  border-radius: 999px;
+  color: var(--color-ink);
+  background: rgba(238, 247, 243, 0.7);
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.artifact-chip strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.relation-chip {
+  border-color: rgba(47, 118, 100, 0.16);
+  background: rgba(255, 253, 248, 0.9);
 }
 
 .artifact-list,
-.artifact-warning-list {
+.artifact-warning-list,
+.artifact-timeline {
   display: grid;
   gap: 10px;
   margin: 0;
   padding-left: 18px;
 }
 
+.compact-list {
+  gap: 7px;
+}
+
 .artifact-list li::marker,
-.artifact-warning-list li::marker {
+.artifact-warning-list li::marker,
+.artifact-timeline li::marker {
   color: var(--color-sage);
   font-weight: 800;
 }
 
-.artifact-list strong {
+.artifact-list strong,
+.artifact-timeline strong {
   color: var(--color-ink);
   font-size: 13px;
 }
 
 .artifact-list p,
-.artifact-warning-list li {
+.artifact-warning-list li,
+.artifact-timeline p {
   color: var(--color-muted);
   font-size: 13px;
   line-height: 1.65;
 }
 
-.artifact-list p {
+.artifact-list p,
+.artifact-timeline p {
+  display: -webkit-box;
+  overflow: hidden;
   margin: 4px 0 0;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
 }
 
 .artifact-graph-grid {
@@ -2061,6 +2284,31 @@ watch(
   margin: auto;
 }
 
+
+@media (min-width: 1181px) {
+  .artifact-card {
+    padding: 14px;
+  }
+}
+
+@media (max-width: 1320px) and (min-width: 1181px) {
+  .workbench-body {
+    grid-template-columns: minmax(200px, 250px) minmax(500px, 1fr) minmax(280px, 340px);
+  }
+}
+
+@media (max-width: 1180px) and (min-width: 821px) {
+  .artifact-stack {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+
+  .artifact-hero,
+  .artifact-section:has(.artifact-event-list),
+  .artifact-section:has(.artifact-timeline) {
+    grid-column: 1 / -1;
+  }
+}
 @media (max-width: 1180px) {
   .workbench-page {
     grid-template-rows: auto minmax(0, 1fr);
@@ -2132,6 +2380,14 @@ watch(
     min-height: 40px;
   }
 
+  .artifact-metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .artifact-section-heading {
+    align-items: flex-start;
+  }
+
   .workbench-body {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -2187,6 +2443,31 @@ watch(
 
   .workbench-editor-column {
     min-height: 520px;
+  }
+
+  .extension-tabs button {
+    min-width: 74px;
+    padding-inline: 8px;
+    white-space: nowrap;
+  }
+
+  .artifact-card,
+  .extension-card {
+    padding: 14px;
+  }
+
+  .artifact-section {
+    padding: 12px;
+    border-radius: 10px;
+  }
+
+  .artifact-metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .artifact-event-list li {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
   }
 
   .workbench-extension-column {

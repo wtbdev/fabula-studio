@@ -139,18 +139,22 @@ func (b *EventBus) SSEHandler() http.HandlerFunc {
 			return
 		}
 
-		// Subscribe to events
+		// Subscribe before replaying recent events. Events published after this point are
+		// delivered through the live channel, so the replay must only include the snapshot
+		// captured before subscription to avoid duplicating in-flight events.
+		recentEvents := b.GetEventLog()
 		client := b.Subscribe()
 		defer b.Unsubscribe(client)
 
-		// Send recent events first
-		recentEvents := b.GetEventLog()
+		// Send recent events first for page refresh recovery.
 		for _, event := range recentEvents {
+			if !eventMatchesRequest(event, r) {
+				continue
+			}
 			data, _ := json.Marshal(event)
 			fmt.Fprintf(w, "data: %s\n\n", data)
 		}
 		flusher.Flush()
-
 		// Listen for new events or client disconnect
 		for {
 			select {
@@ -166,6 +170,18 @@ func (b *EventBus) SSEHandler() http.HandlerFunc {
 			}
 		}
 	}
+}
+
+func eventMatchesRequest(event PipelineEvent, r *http.Request) bool {
+	projectID := r.URL.Query().Get("projectId")
+	if projectID != "" && event.ProjectID != projectID {
+		return false
+	}
+	jobID := r.URL.Query().Get("jobId")
+	if jobID != "" && event.JobID != jobID {
+		return false
+	}
+	return true
 }
 
 // EventHandler returns an HTTP handler for querying events.

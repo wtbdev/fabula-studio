@@ -82,7 +82,7 @@ const projectDescription = (project: ProjectDTO) => {
 }
 
 const projectPrimaryActionLabel = (project: ProjectDTO) => {
-  if (generatingProjectId.value === project.id || project.status === 'generating') return '生成中'
+  if (project.status === 'generating') return '查看进度'
   if (project.status === 'completed') return '编辑剧本'
   if (project.status === 'failed') return '重新生成'
   return '生成剧本'
@@ -244,7 +244,7 @@ const handleDeleteProject = (project: ProjectDTO) => {
 }
 
 const handleGenerateProject = async (project: ProjectDTO) => {
-  if (authState.user && authState.user.aiPoints < 300) {
+  if (authState.user && authState.user.aiPoints < 1) {
     message.warning('AI 点数不足，无法生成剧本。')
     return
   }
@@ -272,12 +272,10 @@ const handleGenerateProject = async (project: ProjectDTO) => {
 }
 
 const handlePrimaryProjectAction = async (project: ProjectDTO) => {
-  if (project.status === 'completed') {
+  if (project.status === 'completed' || project.status === 'generating') {
     await router.push(`/projects/${project.id}/edit`)
     return
   }
-
-  if (project.status === 'generating') return
 
   await handleGenerateProject(project)
 }
@@ -455,7 +453,6 @@ onUnmounted(() => {
                 size="small"
                 type="primary"
                 :loading="generatingProjectId === project.id"
-                :disabled="project.status === 'generating'"
                 @click="handlePrimaryProjectAction(project)"
               >
                 <template #icon>
