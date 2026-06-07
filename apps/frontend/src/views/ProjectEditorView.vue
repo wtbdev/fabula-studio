@@ -276,19 +276,6 @@ const getString = (record: Record<string, unknown>, key: string) => {
   const value = record[key]
   return typeof value === 'string' ? value : ''
 }
-const resetRealtimeGeneration = () => {
-  seenRealtimeEventKeys.value = new Set()
-  realtimeEvents.value = []
-  realtimeCharacters.value = []
-  realtimeRelations.value = []
-  realtimePlans.value = []
-  realtimeSceneHeadings.value = []
-  realtimeTraceId.value = null
-  realtimeRunId.value = null
-  realtimeProgress.value = null
-  realtimeCurrentStep.value = null
-  pendingGenerationJobId.value = null
-}
 
 
 const collectRealtimePlans = (details: EventDetails) => {
@@ -824,66 +811,6 @@ const handleProjectSettingsSave = async () => {
   }
 }
 
-const handleGenerateProject = async () => {
-  if (!project.value || isWorkbenchLocked.value) return
-
-  if (saveStatus.value === 'dirty' || saveStatus.value === 'failed') {
-    const saved = await saveCurrentScene()
-    if (!saved) return
-  }
-
-  const previousStatus = project.value.status
-  const previousGenerateStatus = generateStatus.value
-  generating.value = true
-  project.value = {
-    ...project.value,
-    status: 'generating',
-    errorMessage: null,
-    updatedAt: new Date().toISOString(),
-  }
-  extensionTab.value = 'artifacts'
-  resetRealtimeGeneration()
-  startGenerationEvents()
-  generateStatus.value = {
-    projectId: project.value.id,
-    status: 'queued',
-    progress: 0,
-    currentStep: 'queued',
-  }
-
-  try {
-    const result = await generationApi.generate(project.value.id, {
-      config: project.value.config,
-      adaptationProfile: project.value.adaptationProfile,
-    })
-    pendingGenerationJobId.value = result.jobId ?? result.job?.id ?? pendingGenerationJobId.value
-    generateStatus.value = {
-      projectId: project.value.id,
-      jobId: result.jobId,
-      job: result.job,
-      status: result.status,
-      progress: result.job?.progress ?? (result.status === 'completed' ? 100 : 0),
-      currentStep: result.job?.currentStep ?? 'source_indexing',
-      artifacts: result.artifacts,
-    }
-    applyGenerationArtifacts(result.artifacts ?? result.job?.artifacts)
-    message.success('生成任务已启动')
-    stopGenerationEvents()
-    startGenerationPolling()
-  } catch (error) {
-    if (project.value) {
-      project.value = {
-        ...project.value,
-        status: previousStatus,
-        updatedAt: new Date().toISOString(),
-      }
-    }
-    generateStatus.value = previousGenerateStatus
-    generating.value = false
-    stopGenerationEvents()
-    message.error(error instanceof Error ? error.message : '剧本生成失败，请稍后重试')
-  }
-}
 
 const handleExit = async () => {
   if (isNavigationLocked.value) return
